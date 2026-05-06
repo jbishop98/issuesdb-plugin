@@ -1,0 +1,9 @@
+{
+  "name": "issuesdb-plugin",
+  "version": "1.0.0",
+  "description": "Skills for grooming and working issuesdb issues end-to-end — from triage through PR",
+  "author": {
+    "name": "jbishop98",
+    "email": "thebishman@gmail.com"
+  }
+}
