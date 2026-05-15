@@ -69,7 +69,7 @@ Classify the issue before starting. This gates how much rigor to apply in each s
 ### 9. Open PR (do NOT merge)
 - Use `commit-commands:commit-push-pr`.
 - PR description must link the issuesdb issue id and summarize the plan + verification evidence.
-- Once you have the PR URL, do ALL of the following — do not skip any:
+- **`commit-commands:commit-push-pr` handles git/GitHub only — its scope ends when it returns the PR URL. The three issuesdb steps below are YOUR responsibility as the orchestrating agent. They are not delegated to that skill and will not happen automatically. Execute them immediately after the PR URL is in hand:**
   1. `mcp__issuesdb__update_issue` — set `status=in-review`.
   2. `mcp__issuesdb__add_comment` — post the PR URL as a comment, e.g. "PR opened: <url>".
   3. `mcp__issuesdb__update_issue` — append the PR URL to the issue `description`, e.g. add a line "PR: <url>" at the end.

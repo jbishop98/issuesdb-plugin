@@ -63,12 +63,21 @@ Draft an updated issue body with these sections:
 
 ### 5. Decide readiness
 Pick one:
-- **Ready** — no open questions, criteria are testable. Update the issue body via `mcp__issuesdb__update_issue` with the groomed content **and set `status=ready`**. This removes it from the ungroomed queue and queues it for implementation.
+- **Ready** — no open questions, criteria are testable. Update the issue body via `mcp__issuesdb__update_issue` with the groomed content **and set `status=ready`**. This removes it from the ungroomed queue and queues it for implementation. If there are existing comments on the issue (i.e., this completes a "needs input" cycle), also call `mcp__issuesdb__add_comment` with: "Grooming complete — description updated above. Earlier comments reflect pre-clarification Q&A and may be superseded."
 - **Needs input** — open questions remain. Post the groomed draft *as a comment* via `mcp__issuesdb__add_comment` with the questions surfaced at the top, and tag the requester. Leave `status=open` so it stays in the queue. Don't overwrite the issue body until questions are answered. Comment bodies render as **markdown** in the web UI — use headers, bullets, and code spans freely.
 - **Reject / duplicate / won't-fix** — explain in a comment, link related issues, propose closing. Set `status=closed`.
 
 ### 6. Report
 Output a one-paragraph summary to the user: which path you took, the open questions (if any), and a link to the issue.
+
+### 7. Notify
+Call `PushNotification` with a concise message so the requester is alerted on mobile:
+
+- **Ready:** `"Groomed: <issue title> (#<id>) — marked ready for implementation."`
+- **Needs input:** `"Grooming paused: <issue title> (#<id>) — <N> question(s) need your input."`
+- **Closed:** `"Closed: <issue title> (#<id>) — see issue comment for reasoning."`
+
+This requires Remote Control + "Push when Claude decides" enabled in the Claude.ai app. If not configured the tool call is silently skipped — the command still completes normally.
 
 ## Guardrails
 

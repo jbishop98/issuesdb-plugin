@@ -15,6 +15,8 @@ You are read-only. Never edit code. Never modify the issue. Never run tests. You
 
 If the issue id is provided, fetch it via `mcp__issuesdb__get_issue` and read existing comments.
 
+**Source-of-truth hierarchy:** The current issue description is the authoritative specification. Comments may contain prior grooming drafts or Q&A that predate the current description. When description and comments conflict, the description wins. Read comments only for supplementary context not in the description (e.g. PR links, constraints added post-groom, explicit decisions).
+
 ## What to assess
 
 Produce findings in these buckets — be specific, cite file paths and line numbers where relevant:
