@@ -13,7 +13,7 @@ Take a raw issue and turn it into something an implementer (human or agent) can 
 
 - `$ARGUMENTS` — the issuesdb issue id. Optional.
   - **If provided:** groom that specific issue.
-  - **If empty:** call `mcp__issuesdb__list_issues` with `status=open`, present the list to the user, and ask which one to groom — or offer to groom all of them in sequence.
+  - **If empty:** auto-select the highest-priority issue via `mcp__issuesdb__list_issues(status=open, limit=1)`. If zero results, output "**RESULT: none**" and exit. If running interactively (user present), you may ask which one to groom before proceeding. If running unattended, auto-select without prompting.
 
 ## Steps
 
@@ -63,12 +63,34 @@ Draft an updated issue body with these sections:
 
 ### 5. Decide readiness
 Pick one:
-- **Ready** — no open questions, criteria are testable. Update the issue body via `mcp__issuesdb__update_issue` with the groomed content **and set `status=ready`**. This removes it from the ungroomed queue and queues it for implementation.
+- **Ready** — no open questions, criteria are testable. Update the issue body via `mcp__issuesdb__update_issue` with the groomed content **and set `status=ready`**. This removes it from the ungroomed queue and queues it for implementation. If there are existing comments on the issue (i.e., this completes a "needs input" cycle), also call `mcp__issuesdb__add_comment` with: "Grooming complete — description updated above. Earlier comments reflect pre-clarification Q&A and may be superseded."
 - **Needs input** — open questions remain. Post the groomed draft *as a comment* via `mcp__issuesdb__add_comment` with the questions surfaced at the top, and tag the requester. Leave `status=open` so it stays in the queue. Don't overwrite the issue body until questions are answered. Comment bodies render as **markdown** in the web UI — use headers, bullets, and code spans freely.
 - **Reject / duplicate / won't-fix** — explain in a comment, link related issues, propose closing. Set `status=closed`.
 
 ### 6. Report
 Output a one-paragraph summary to the user: which path you took, the open questions (if any), and a link to the issue.
+
+### 7. Notify
+Call `PushNotification` with a concise message so the requester is alerted on mobile:
+
+- **Ready:** `"Groomed: <issue title> (#<id>) — marked ready for implementation."`
+- **Needs input:** `"Grooming paused: <issue title> (#<id>) — <N> question(s) need your input."`
+- **Closed:** `"Closed: <issue title> (#<id>) — see issue comment for reasoning."`
+
+This requires Remote Control + "Push when Claude decides" enabled in the Claude.ai app. If not configured the tool call is silently skipped — the command still completes normally.
+
+## Structured output
+
+At the very end of your response, output a machine-parseable result block so orchestrators can consume the outcome. Use exactly this format:
+
+```
+## RESULT
+- status: <ready|needs-input|closed|none>
+- issue_id: <id>
+- questions: <N> (only when status=needs-input)
+```
+
+Do not include any other text in the RESULT block. Output it as the last thing before the final newline.
 
 ## Guardrails
 
