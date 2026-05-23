@@ -13,7 +13,7 @@ Take a raw issue and turn it into something an implementer (human or agent) can 
 
 - `$ARGUMENTS` — the issuesdb issue id. Optional.
   - **If provided:** groom that specific issue.
-  - **If empty:** call `mcp__issuesdb__list_issues` with `status=open`, present the list to the user, and ask which one to groom — or offer to groom all of them in sequence.
+  - **If empty:** auto-select the highest-priority issue via `mcp__issuesdb__list_issues(status=open, limit=1)`. If zero results, output "**RESULT: none**" and exit. If running interactively (user present), you may ask which one to groom before proceeding. If running unattended, auto-select without prompting.
 
 ## Steps
 
@@ -78,6 +78,19 @@ Call `PushNotification` with a concise message so the requester is alerted on mo
 - **Closed:** `"Closed: <issue title> (#<id>) — see issue comment for reasoning."`
 
 This requires Remote Control + "Push when Claude decides" enabled in the Claude.ai app. If not configured the tool call is silently skipped — the command still completes normally.
+
+## Structured output
+
+At the very end of your response, output a machine-parseable result block so orchestrators can consume the outcome. Use exactly this format:
+
+```
+## RESULT
+- status: <ready|needs-input|closed|none>
+- issue_id: <id>
+- questions: <N> (only when status=needs-input)
+```
+
+Do not include any other text in the RESULT block. Output it as the last thing before the final newline.
 
 ## Guardrails
 
