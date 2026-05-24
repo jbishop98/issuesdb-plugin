@@ -1,5 +1,5 @@
 ---
-description: Pull next open issue from issuesdb, plan, implement TDD, test, and open a PR (does NOT merge)
+description: Pull next ready issue from issuesdb, plan, implement TDD, test, open a PR, and report structured result (does NOT merge)
 argument-hint: [optional issue id, otherwise picks highest-priority open issue]
 ---
 
@@ -74,8 +74,20 @@ Classify the issue before starting. This gates how much rigor to apply in each s
   2. `mcp__issuesdb__add_comment` — post the PR URL as a comment, e.g. "PR opened: <url>".
   3. `mcp__issuesdb__update_issue` — append the PR URL to the issue `description`, e.g. add a line "PR: <url>" at the end.
 
-### 10. Stop
-- **Do not merge.** Merging requires explicit human approval. Report the PR URL and exit.
+### 10. Report structured result
+- Do NOT merge — the orchestrator (or human) handles merge policy separately.
+- Output a machine-parseable result block at the very end of your response:
+
+```
+## RESULT
+- tier: <1|2|3>
+- pr_url: <url or "none">
+- tests_pass: <true|false>
+- security_findings: <none|N non-critical|N critical>
+- status: <done|blocked>
+```
+
+Do not include any other text after this block. The orchestrator consumes it to decide review depth and merge eligibility.
 
 ## Guardrails
 

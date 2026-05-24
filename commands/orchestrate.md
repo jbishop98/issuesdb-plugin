@@ -1,6 +1,7 @@
 ---
 description: Orchestrate the issuesdb pipeline — groom, develop, review, merge, cleanup (one item per phase per invocation)
 argument-hint: [issue-id] (when provided, scopes grooming and development to a specific issue; otherwise picks the next actionable item across all phases)
+argument-hint: none (processes the next actionable item across all phases; cron-compatible)
 ---
 
 # Orchestrate the issuesdb pipeline
