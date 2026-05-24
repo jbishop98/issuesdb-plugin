@@ -1,11 +1,21 @@
 ---
 description: Orchestrate the issuesdb pipeline — groom, develop, review, merge, cleanup (one item per phase per invocation)
+argument-hint: [issue-id] (when provided, scopes grooming and development to a specific issue; otherwise picks the next actionable item across all phases)
 argument-hint: none (processes the next actionable item across all phases; cron-compatible)
 ---
 
 # Orchestrate the issuesdb pipeline
 
 Run one full pipeline cycle: pick the next actionable item in each phase and process it. Dispatch subagents for grooming + development. Handle review, merge, and cleanup directly (read-only: no code edits by the orchestrator itself).
+
+## Scoping
+
+Capture `$ARGUMENTS`. If non-empty, set `scoped_issue_id = $ARGUMENTS` and operate in scoped mode:
+- Phase 1 grooms ONLY `scoped_issue_id` via `get_issue(id)`, not the next global open issue.
+- Phase 2 develops ONLY the same issue, if Phase 1 set it to `status=ready`.
+- If the scoped issue was groomed to `status=needs-input` or `status=closed`, Phase 2 is skipped.
+- Phases 3-5 remain global (review, merge, and cleanup follow existing per-phase logic).
+- When `$ARGUMENTS` is empty (cron mode), behavior is unchanged — global `list_issues` for each phase.
 
 ## Phase loop
 
@@ -16,6 +26,23 @@ All phase transitions MUST comment-trail to issuesdb via `mcp__issuesdb__add_com
 ---
 
 ### Phase 1 — GROOM
+
+**If `scoped_issue_id` is set (scoped mode):**
+
+1. `mcp__issuesdb__get_issue(id=scoped_issue_id)` — verify the issue exists.
+2. If not found: `mcp__issuesdb__add_comment(issue_id=scoped_issue_id, body="Orchestrator: invalid issue ID — not found.")`, exit.
+3. Dispatch a **general subagent** via the Task tool with this prompt:
+   ```
+   /groom-issue scoped_issue_id
+   ```
+4. Parse the subagent's output for the `## RESULT` block:
+   - `status=ready` → continue to Phase 2 (carry `scoped_issue_id` as the develop target)
+   - `status=needs-input` → `mcp__issuesdb__add_comment(issue_id=scoped_issue_id, body="Orchestrator: grooming paused — N questions need human input.")`, skip Phases 2-4, continue to Phase 5
+   - `status=closed` → skip Phases 2-4, continue to Phase 5
+   - `status=none` → exit (nothing to groom)
+5. If the subagent fails or times out: `mcp__issuesdb__add_comment(issue_id=scoped_issue_id, body="Orchestrator: grooming subagent failed. Will retry on next cycle.")`, exit.
+
+**Otherwise (global / cron mode):**
 
 1. `mcp__issuesdb__list_issues(status="open", limit=1)`
 2. If no results: skip to Phase 2.
@@ -33,6 +60,25 @@ All phase transitions MUST comment-trail to issuesdb via `mcp__issuesdb__add_com
 ---
 
 ### Phase 2 — DEVELOP
+
+**If `scoped_issue_id` is set (scoped mode):**
+
+1. If Phase 1 did NOT produce `status=ready` for the scoped issue: skip Phases 3, 4, and 5 entirely, then exit.
+2. Set `Y = scoped_issue_id` (the issue ID from Phase 1 result, already confirmed ready).
+3. Dispatch a **general subagent** via the Task tool with this prompt:
+   ```
+   /work-issuesdb Y
+   ```
+4. Parse the subagent's output for the `## RESULT` block. Save these values for subsequent phases:
+   - `tier` (1|2|3)
+   - `pr_url` (URL or "none")
+   - `tests_pass` (true|false)
+   - `security_findings` (none|N non-critical|N critical)
+   - `status` (done|blocked)
+5. If `status=blocked` or `pr_url="none"`: `mcp__issuesdb__add_comment(issue_id=Y, body="Orchestrator: development blocked — see subagent output.")`, exit.
+6. If `status=done`: continue to Phase 3.
+
+**Otherwise (global / cron mode):**
 
 1. `mcp__issuesdb__list_issues(status="ready", limit=1)`
 2. If no results: skip Phases 3, 4, and 5 entirely (nothing to develop/review/merge), then exit.
