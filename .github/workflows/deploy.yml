@@ -1,0 +1,10 @@
+name: Deploy to local opencode
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+jobs:
+  deploy:
+    runs-on: self-hosted
+    steps:
+      - run: git -C $HOME/dev/issuesdb-plugin pull --ff-only
