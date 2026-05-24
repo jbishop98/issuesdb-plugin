@@ -5,11 +5,14 @@ argument-hint: [optional issue id, otherwise picks highest-priority open issue]
 
 # Work an issuesdb issue end-to-end
 
-Pick up an open issue from issuesdb and drive it to a reviewable PR.
+Pick up an open issue from issuesdb and drive it to a reviewable PR. Update the session summary to "Work <issue #> < issue title>"
 
 ## Inputs
 
-- `$ARGUMENTS` — optional: a specific issuesdb issue id. If empty, auto-select.
+- `$ARGUMENTS` — optional: a specific issuesdb issue id, optionally followed by `--tier N` (1/2/3).
+  - `issue_id` — work this specific issue.
+  - `issue_id --tier N` — work this issue with tier pre-classified by the orchestrator; skip self-triage.
+  - empty — auto-select the next ready issue and self-classify.
 
 ## Impact Tiers
 
@@ -28,14 +31,17 @@ Classify the issue before starting. This gates how much rigor to apply in each s
 ## Steps
 
 ### 1. Select the issue
-- If `$ARGUMENTS` is non-empty: `mcp__issuesdb__get_issue` with that id.
+- Parse `$ARGUMENTS`: extract `issue_id` and optional `--tier N`. If `--tier N` is present, set `provided_tier = N`; otherwise `provided_tier = null`.
+- If `issue_id` is non-empty: `mcp__issuesdb__get_issue` with that id.
 - Otherwise: `mcp__issuesdb__list_projects` then `mcp__issuesdb__list_issues` (status=ready). Pick the highest-priority issue that is **not** blocked, **not** already in-progress, and has a clear enough description to act on. (`status=ready` means it has been groomed — ungroomed issues have `status=open` and should be run through `/groom-issue` first.)
 - If nothing is actionable, STOP and report: "No actionable issues — top candidates: …" with a one-line reason for each.
 
 ### 2. Classify impact
-- Assign a tier (1/2/3) using the table above. State it explicitly: "**Tier N — reason**". This determines steps 3–7.
+- **If `provided_tier` is set:** use it directly. State: "**Tier N — pre-classified by orchestrator**". Skip to Step 3.
+- **Otherwise:** assign a tier (1/2/3) using the table above. State it explicitly: "**Tier N — reason**". This determines steps 3–7.
 
 ### 3. Triage / pre-flight
+- **If `provided_tier` is set:** skip this step entirely — the orchestrator has already run `issue-triage` and resolved ambiguities.
 - **Tier 1:** Quick self-check — does the issue description have enough to act on? If yes, proceed.
 - **Tier 2–3:** Invoke the **`issue-triage`** subagent with the issue body. It returns: scope assessment, ambiguities, codebase touchpoints, risk flags.
 - If triage (any tier) flags the issue as ambiguous or under-specified, STOP and post the questions as a comment via `mcp__issuesdb__add_comment`. Do not start implementation.
