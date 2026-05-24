@@ -7,4 +7,6 @@ jobs:
   deploy:
     runs-on: self-hosted
     steps:
-      - run: git -C $HOME/dev/issuesdb-plugin pull --ff-only
+      - run: |
+          git -C $HOME/dev/issuesdb-plugin checkout main
+          git -C $HOME/dev/issuesdb-plugin pull --ff-only
