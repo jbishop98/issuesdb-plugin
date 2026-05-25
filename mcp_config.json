@@ -2,7 +2,10 @@
   "mcpServers": {
     "issuesdb": {
       "command": "/Users/jared/dev/.venv-issuesdb/bin/python",
-      "args": ["-m", "issuesdb.mcp_server"],
+      "args": [
+        "-m",
+        "issuesdb.mcp_server"
+      ],
       "env": {
         "ISSUESDB_DATABASE_URL": "${ISSUESDB_DATABASE_URL}"
       }
