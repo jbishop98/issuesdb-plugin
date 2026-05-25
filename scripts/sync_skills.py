@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Sync issuesdb-plugin commands to Claude Desktop skill definitions.
+"""Sync issuesdb-plugin commands to skill definitions.
 
 Reads .md files from commands/ and writes them as SKILL.md files under
-~/.claude/skills/<name>/SKILL.md, converting frontmatter as needed.
+the specified target directory, converting frontmatter as needed.
 
 Usage:
-    python scripts/sync_skills.py [--dry-run] [--delete-removed]
+    python scripts/sync_skills.py [--dry-run] [--delete-removed] [--target target]
 """
 
 import argparse
@@ -16,6 +16,7 @@ from pathlib import Path
 
 PLUGIN_DIR = Path(__file__).parent.parent
 COMMANDS_DIR = PLUGIN_DIR / "commands"
+PLUGIN_SKILLS_DIR = PLUGIN_DIR / "skills"
 DEFAULT_SKILLS_DIR = Path.home() / ".claude" / "skills"
 ANTIGRAVITY_SKILLS_DIR = Path.home() / ".gemini" / "antigravity" / "skills"
 OPENCODE_SKILLS_DIR = Path.home() / ".config" / "opencode" / "skills"
@@ -130,14 +131,16 @@ def main() -> None:
     parser.add_argument("--dry-run", action="store_true", help="Print what would change without writing")
     parser.add_argument("--delete-removed", action="store_true",
                         help="Remove skills whose command file no longer exists (only if marker present)")
-    parser.add_argument("--target", choices=["claude", "antigravity", "opencode"], default="claude",
-                        help="Target platform to sync skills to (choices: claude, antigravity, opencode; default: claude)")
+    parser.add_argument("--target", choices=["plugin", "opencode", "claude", "antigravity"], default="plugin",
+                        help="Target to sync skills to (choices: plugin, opencode, claude, antigravity; default: plugin)")
     args = parser.parse_args()
 
-    if args.target == "antigravity":
-        skills_dir = ANTIGRAVITY_SKILLS_DIR
+    if args.target == "plugin":
+        skills_dir = PLUGIN_SKILLS_DIR
     elif args.target == "opencode":
         skills_dir = OPENCODE_SKILLS_DIR
+    elif args.target == "antigravity":
+        skills_dir = ANTIGRAVITY_SKILLS_DIR
     else:
         skills_dir = DEFAULT_SKILLS_DIR
 
