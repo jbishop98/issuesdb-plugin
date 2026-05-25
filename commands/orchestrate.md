@@ -65,7 +65,7 @@ All phase transitions MUST comment-trail to issuesdb via `mcp__issuesdb__add_com
 **Find the issue to triage:**
 
 - **Scoped mode:** `Y = scoped_issue_id` (already confirmed ready from Phase 1). If Phase 1 did not produce `status=ready`, skip Phases 2-5 entirely and go to Phase 6.
-- **Global/cron mode:** `mcp__issuesdb__list_issues(status="ready", limit=1)`. If no results, skip to Phase 3.
+- **Global/cron mode:** `mcp__issuesdb__list_issues(status="ready", limit=5)`. If no results, skip to Phase 3.
 
 **Classify impact tier** from the issue title and description:
 
@@ -77,9 +77,19 @@ When in doubt, go one tier higher. If the issue touches auth, user data, or exte
 
 **Ingest the md context files from the relevant project** so you can issue special instructions to the development subagent where applicable.
 
-**Tier 1 — skip triage subagent:**
+**Tier 1 — skip triage subagent (global/cron mode: also discover bundle peers):**
 
-Set `triage_report = null`. Continue to Phase 3.
+Set `triage_report = null`.
+
+**In global/cron mode only**, check for additional Tier 1 peers in the same project before dispatching development:
+1. Note the `project` field from issue Y's object (call `mcp__issuesdb__get_issue(id=Y)` if needed to retrieve it).
+2. `mcp__issuesdb__list_issues(status="ready", project=Y.project, limit=5)` — fetch other ready issues in the same project.
+3. Filter out Y itself. Scan remaining issues' titles/descriptions — keep only those with clear Tier 1 signals (docs, typos, copy, simple config). Exclude any showing Tier 2+ signals (bug fixes, feature work, auth, schema, perf).
+4. Cap at 3 additional issues (total bundle ≤ 4).
+5. Set `bundle_ids = [Y, id2, id3, ...]`. If no qualifying peers: `bundle_ids = [Y]`.
+6. If `len(bundle_ids) > 1`: `mcp__issuesdb__add_comment(issue_id=Y, body="Orchestrator: bundling <N> Tier 1 issues from project <project> into single PR: #Y, #id2, ...")`
+
+Continue to Phase 3.
 
 **Tier 2–3 — invoke the `issue-triage` subagent:**
 
@@ -108,14 +118,25 @@ Dispatch with the issue body and the repo cwd. Parse the structured report for:
 
 Receives `Y` (issue id), `tier` (1/2/3), and `triage_report` from Phase 2.
 
-**If `scoped_issue_id` is set and Phase 2 did not clear the issue for development:** skip Phases 3–5.
+**If `scoped_issue_id` is set and Phase 2 did not clear the issue for development:** skip Phases 3–6.
 
 Dispatch `/work-issuesdb` with tier pre-provided so the subagent skips its own triage:
 
-**Tier 1:**
+**Tier 1 (scoped mode — always single issue):**
 ```
 /work-issuesdb Y --tier 1
 ```
+
+**Tier 1 (global/cron mode — single issue, no qualifying peers):**
+```
+/work-issuesdb Y --tier 1
+```
+
+**Tier 1 (global/cron mode — bundle, `len(bundle_ids) > 1`):**
+```
+/work-issuesdb id1 id2 id3 --tier 1
+```
+Pass all IDs in `bundle_ids` as space-separated arguments.
 
 **Tier 2:**
 ```
@@ -131,13 +152,14 @@ Touchpoints: <touchpoints list>
 
 Parse the subagent's output for the `## RESULT` block. Save these values for subsequent phases:
 - `tier` (1|2|3)
+- `issue_ids` (comma-separated; single-issue runs emit one ID — set `bundle_ids = issue_ids list`)
 - `pr_url` (URL or "none")
 - `tests_pass` (true|false)
 - `security_findings` (none|N non-critical|N critical)
-- `status` (done|blocked)
+- `status` (done|blocked|partial)
 
 If `status=blocked` or `pr_url="none"`: `mcp__issuesdb__add_comment(issue_id=Y, body="Orchestrator: development blocked — see subagent output.")`, exit.
-If `status=done`: continue to Phase 4.
+If `status=done` or `status=partial`: continue to Phase 4.
 
 ---
 
@@ -183,7 +205,7 @@ Apply auto-merge policy based on tier and the outcome of prior phases.
 
 1. **Tier 1 + tests_pass == true:**
    - `gh pr merge <pr_url> --squash --auto`
-   - `mcp__issuesdb__add_comment(issue_id=Y, body="Orchestrator: auto-merged (Tier 1, tests passed).")`
+   - For each id in `bundle_ids`: `mcp__issuesdb__add_comment(issue_id=<id>, body="Orchestrator: auto-merged (Tier 1, tests passed).")`
    - Continue to Phase 6.
 
 2. **Tier 2 + tests_pass == true + no critical review findings:**
@@ -221,9 +243,10 @@ Detect and clean up one merged branch per invocation.
    ```bash
    git branch -D <branch_name>
    ```
-6. Close the issue:
-   - `mcp__issuesdb__update_issue(<id>, status="closed")`
-   - `mcp__issuesdb__add_comment(issue_id=<id>, body="Orchestrator: cleanup complete — branch deleted, issue closed.")`
+6. Close issues:
+   - If `bundle_ids` is available from this invocation's Phase 3 RESULT: close each id in `bundle_ids`.
+   - Otherwise (cross-invocation cleanup): close only the primary `<id>` parsed from the branch name.
+   - For each id being closed: `mcp__issuesdb__update_issue(<id>, status="closed")` and `mcp__issuesdb__add_comment(issue_id=<id>, body="Orchestrator: cleanup complete — branch deleted, issue closed.")`
 7. Exit.
 
 ## Guardrails
