@@ -9,9 +9,10 @@ Pick up an open issue from issuesdb and drive it to a reviewable PR. Update the 
 
 ## Inputs
 
-- `$ARGUMENTS` — optional: a specific issuesdb issue id, optionally followed by `--tier N` (1/2/3).
+- `$ARGUMENTS` — optional: one or more issuesdb issue ids, optionally followed by `--tier N` (1/2/3).
   - `issue_id` — work this specific issue.
   - `issue_id --tier N` — work this issue with tier pre-classified by the orchestrator; skip self-triage.
+  - `id1 id2 id3 --tier 1` — work a bundle of Tier 1 issues in one pass; only the orchestrator may pass multiple IDs.
   - empty — auto-select the next ready issue and self-classify.
 
 ## Impact Tiers
@@ -31,9 +32,11 @@ Classify the issue before starting. This gates how much rigor to apply in each s
 ## Steps
 
 ### 1. Select the issue
-- Parse `$ARGUMENTS`: extract `issue_id` and optional `--tier N`. If `--tier N` is present, set `provided_tier = N`; otherwise `provided_tier = null`.
-- If `issue_id` is non-empty: `mcp__issuesdb__get_issue` with that id.
-- Otherwise: `mcp__issuesdb__list_projects` then `mcp__issuesdb__list_issues` (status=ready). Pick the highest-priority issue that is **not** blocked, **not** already in-progress, and has a clear enough description to act on. (`status=ready` means it has been groomed — ungroomed issues have `status=open` and should be run through `/groom-issue` first.)
+- Parse `$ARGUMENTS`: extract one or more `issue_id`s and optional `--tier N`. If `--tier N` is present, set `provided_tier = N`; otherwise `provided_tier = null`.
+- Set `issue_ids = [all extracted ids]`, `primary_id = issue_ids[0]`.
+- If `issue_ids` is non-empty: `mcp__issuesdb__get_issue` for each id in `issue_ids`.
+- Otherwise: `mcp__issuesdb__list_projects` then `mcp__issuesdb__list_issues` (status=ready). Pick the highest-priority issue that is **not** blocked, **not** already in-progress, and has a clear enough description to act on. Set `issue_ids = [picked_id]`, `primary_id = picked_id`. (`status=ready` means it has been groomed — ungroomed issues have `status=open` and should be run through `/groom-issue` first.)
+- **Bundle safety check**: if `len(issue_ids) > 1`, verify all issues look like Tier 1 (docs, typos, copy, simple config). If any issue shows Tier 2+ signals, drop it from the bundle and log a warning comment on that issue: "Orchestrator: dropped from bundle — issue appears to be Tier 2+, will be worked separately."
 - If nothing is actionable, STOP and report: "No actionable issues — top candidates: …" with a one-line reason for each.
 
 ### 2. Classify impact
@@ -50,15 +53,17 @@ Classify the issue before starting. This gates how much rigor to apply in each s
 - **Tier 1:** Write a brief inline plan (a few bullet points). Post as a comment.
 - **Tier 2:** Invoke `superpowers:writing-plans`. Post the plan as a comment.
 - **Tier 3:** Invoke `superpowers:brainstorming` first, then `superpowers:writing-plans`. Post the plan as a comment.
-- Update issue status to in-progress: `mcp__issuesdb__update_issue`.
+- Update all issues in `issue_ids` to in-progress: `mcp__issuesdb__update_issue` for each id.
 
 ### 5. Isolate
-- Use `superpowers:using-git-worktrees` to create a fresh worktree+branch named `issue-<id>-<slug>`.
+- **Single issue:** Use `superpowers:using-git-worktrees` to create a fresh worktree+branch named `issue-<id>-<slug>`.
+- **Bundle (`len(issue_ids) > 1`):** Use `superpowers:using-git-worktrees` to create a fresh worktree+branch named `issue-<primary_id>-bundle`.
 - All subsequent edits happen in that worktree.
 
 ### 6. Implement
 - Use `superpowers:test-driven-development` and `superpowers:executing-plans`.
 - Tests first, then implementation. No skipping the red step.
+- **Bundle:** work through each issue in `issue_ids` sequentially in the same worktree. If any single issue in the bundle is blocked, skip it, note it in the RESULT, and continue with the remaining issues. Complete as many as possible.
 
 ### 7. Verify
 - **Tier 1:** Run tests scoped to affected files/packages. Paste actual output.
@@ -74,8 +79,9 @@ Classify the issue before starting. This gates how much rigor to apply in each s
 
 ### 9. Open PR (do NOT merge)
 - Use `commit-commands:commit-push-pr`.
-- PR description must link the issuesdb issue id and summarize the plan + verification evidence.
-- **`commit-commands:commit-push-pr` handles git/GitHub only — its scope ends when it returns the PR URL. The three issuesdb steps below are YOUR responsibility as the orchestrating agent. They are not delegated to that skill and will not happen automatically. Execute them immediately after the PR URL is in hand:**
+- PR description must link all issuesdb issue ids in `issue_ids` and summarize the plan + verification evidence.
+- **`commit-commands:commit-push-pr` handles git/GitHub only — its scope ends when it returns the PR URL. The issuesdb steps below are YOUR responsibility. They are not delegated to that skill and will not happen automatically. Execute them immediately after the PR URL is in hand.**
+- For **each** id in `issue_ids`:
   1. `mcp__issuesdb__update_issue` — set `status=in-review`.
   2. `mcp__issuesdb__add_comment` — post the PR URL as a comment, e.g. "PR opened: <url>".
   3. `mcp__issuesdb__update_issue` — append the PR URL to the issue `description`, e.g. add a line "PR: <url>" at the end.
@@ -87,11 +93,15 @@ Classify the issue before starting. This gates how much rigor to apply in each s
 ```
 ## RESULT
 - tier: <1|2|3>
+- issue_ids: <id> or <id1,id2,id3>
 - pr_url: <url or "none">
 - tests_pass: <true|false>
 - security_findings: <none|N non-critical|N critical>
-- status: <done|blocked>
+- status: <done|blocked|partial>
 ```
+
+`issue_ids`: comma-separated list of all issue IDs resolved in this run (single-issue runs emit one ID).
+`status=partial`: some bundled issues completed but at least one was skipped due to a blocker — PR was still opened for the completed ones.
 
 Do not include any other text after this block. The orchestrator consumes it to decide review depth and merge eligibility.
 
@@ -100,4 +110,4 @@ Do not include any other text after this block. The orchestrator consumes it to 
 - Never force-push. Never push to `main`/`master` directly.
 - Never edit `.env`, lockfiles, or CI secrets without explicit confirmation in the issue.
 - If any step fails twice in a row, STOP and post a comment explaining the blocker. Don't thrash.
-- One issue per run. Don't bundle.
+- Never self-select multiple issues. Only accept a bundle when the orchestrator passes multiple IDs with `--tier 1`. Tier 2/3: one issue per run, no exceptions.
