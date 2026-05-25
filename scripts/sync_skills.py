@@ -1,0 +1,150 @@
+#!/usr/bin/env python3
+"""Sync issuesdb-plugin commands to Claude Desktop skill definitions.
+
+Reads .md files from commands/ and writes them as SKILL.md files under
+~/.claude/skills/<name>/SKILL.md, converting frontmatter as needed.
+
+Usage:
+    python scripts/sync_skills.py [--dry-run] [--delete-removed]
+"""
+
+import argparse
+import re
+import shutil
+import sys
+from pathlib import Path
+
+PLUGIN_DIR = Path(__file__).parent.parent
+COMMANDS_DIR = PLUGIN_DIR / "commands"
+DEFAULT_SKILLS_DIR = Path.home() / ".claude" / "skills"
+ANTIGRAVITY_SKILLS_DIR = Path.home() / ".gemini" / "antigravity" / "skills"
+OPENCODE_SKILLS_DIR = Path.home() / ".config" / "opencode" / "skills"
+
+FRONTMATTER_RE = re.compile(r"^---\n(.*?)\n---\n?", re.DOTALL)
+
+
+def parse_frontmatter(text: str) -> tuple[dict[str, str], str]:
+    """Return (fields, body) split from a markdown file."""
+    m = FRONTMATTER_RE.match(text)
+    if not m:
+        return {}, text
+
+    fields: dict[str, str] = {}
+    current_key = None
+    current_val_lines: list[str] = []
+
+    for line in m.group(1).splitlines():
+        kv = re.match(r"^(\w[\w-]*):\s*(.*)", line)
+        if kv:
+            if current_key:
+                fields[current_key] = " ".join(current_val_lines).strip()
+            current_key = kv.group(1)
+            current_val_lines = [kv.group(2)]
+        elif current_key and line.startswith(" "):
+            current_val_lines.append(line.strip())
+
+    if current_key:
+        fields[current_key] = " ".join(current_val_lines).strip()
+
+    body = text[m.end():]
+    return fields, body
+
+
+def build_skill_frontmatter(name: str, description: str) -> str:
+    if "\n" in description or len(description) > 80:
+        # Use block scalar for long descriptions
+        indented = "\n  ".join(description.splitlines())
+        return f"---\nname: {name}\ndescription: >\n  {indented}\n---\n"
+    return f"---\nname: {name}\ndescription: {description}\n---\n"
+
+
+def sync(skills_dir: Path, dry_run: bool = False, delete_removed: bool = False) -> None:
+    command_files = sorted(COMMANDS_DIR.glob("*.md"))
+    if not command_files:
+        print(f"No command files found in {COMMANDS_DIR}")
+        sys.exit(1)
+
+    synced_names: set[str] = set()
+
+    for cmd_path in command_files:
+        name = cmd_path.stem
+        synced_names.add(name)
+
+        text = cmd_path.read_text()
+        fields, body = parse_frontmatter(text)
+        description = fields.get("description", "").strip()
+
+        if not description:
+            print(f"  SKIP  {name}  (no description in frontmatter)")
+            continue
+
+        skill_dir = skills_dir / name
+        skill_path = skill_dir / "SKILL.md"
+        # Append the marker so that delete_removed works properly
+        new_content = build_skill_frontmatter(name, description) + body + "\n\n# synced-from: issuesdb-plugin\n"
+
+        if skill_path.exists():
+            existing = skill_path.read_text()
+            if existing == new_content:
+                print(f"  OK    {name}  (unchanged)")
+                continue
+            action = "UPDATE"
+        else:
+            action = "ADD"
+
+        print(f"  {action}  {name}")
+        if not dry_run:
+            skill_dir.mkdir(parents=True, exist_ok=True)
+            skill_path.write_text(new_content)
+
+    if delete_removed:
+        if skills_dir.exists():
+            for skill_dir in sorted(skills_dir.iterdir()):
+                if not skill_dir.is_dir():
+                    continue
+                # Only remove dirs that were managed by this plugin
+                # (i.e. their name matches a command that no longer exists)
+                # We identify managed skills by checking if a corresponding
+                # command file ever existed — safest heuristic: skip any skill
+                # that was NOT produced from our commands/ dir this run.
+                # To avoid deleting user-created skills, only delete if the
+                # skill name was previously synced by this plugin (we track this
+                # via a marker comment in SKILL.md).
+                skill_path = skill_dir / "SKILL.md"
+                if not skill_path.exists():
+                    continue
+                if skill_dir.name in synced_names:
+                    continue
+                if "# synced-from: issuesdb-plugin" not in skill_path.read_text():
+                    continue
+                print(f"  REMOVE  {skill_dir.name}")
+                if not dry_run:
+                    shutil.rmtree(skill_dir)
+
+    if dry_run:
+        print("\n(dry run — no files written)")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--dry-run", action="store_true", help="Print what would change without writing")
+    parser.add_argument("--delete-removed", action="store_true",
+                        help="Remove skills whose command file no longer exists (only if marker present)")
+    parser.add_argument("--target", choices=["claude", "antigravity", "opencode"], default="claude",
+                        help="Target platform to sync skills to (choices: claude, antigravity, opencode; default: claude)")
+    args = parser.parse_args()
+
+    if args.target == "antigravity":
+        skills_dir = ANTIGRAVITY_SKILLS_DIR
+    elif args.target == "opencode":
+        skills_dir = OPENCODE_SKILLS_DIR
+    else:
+        skills_dir = DEFAULT_SKILLS_DIR
+
+    print(f"Source: {COMMANDS_DIR}")
+    print(f"Target: {skills_dir}\n")
+    sync(skills_dir, dry_run=args.dry_run, delete_removed=args.delete_removed)
+
+
+if __name__ == "__main__":
+    main()
