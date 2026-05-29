@@ -10,13 +10,18 @@ Run one full pipeline cycle: pick the next actionable item in each phase and pro
 
 ## Scoping
 
-Capture `$ARGUMENTS`. If non-empty, set `scoped_issue_id = $ARGUMENTS` and operate in scoped mode:
-- Phase 1 grooms ONLY `scoped_issue_id` via `get_issue(id)`, not the next global open issue.
-- Phase 2 triages ONLY the same issue.
-- Phase 3 develops ONLY the same issue, if Phase 2 cleared it for development.
-- If the scoped issue was groomed to `status=needs-input` or `status=closed`, Phases 2-4 are skipped.
+Capture `$ARGUMENTS` and split by whitespace to get `scoped_ids` list.
+
+**If `scoped_ids` is non-empty, operate in scoped mode:**
+- If `scoped_ids` contains a single ID: set `bundle_ids = [scoped_ids[0]]`.
+- If `scoped_ids` contains multiple IDs: fetch each via `get_issue(id)` to confirm they exist and share the same `project` field. If projects differ, comment on the primary ID ("Orchestrator: bundling requires all IDs to share the same project — aborting.") and exit. Set `bundle_ids = scoped_ids`.
+- Phase 1 grooms each issue in `bundle_ids` (skipping any already at Ready or In-Progress).
+- Phase 2 triages using `bundle_ids[0]` as the representative — tier classification applies to the whole bundle.
+- Phase 3 develops all issues in `bundle_ids` together.
+- If any issue is groomed to `status=needs-input` or `status=closed`, it is dropped from `bundle_ids`; if `bundle_ids` becomes empty, Phases 2-5 are skipped.
 - Phases 4-6 remain global (review, merge, and cleanup follow existing per-phase logic).
-- When `$ARGUMENTS` is empty (cron mode), behavior is unchanged — global `list_issues` for each phase.
+
+**If `$ARGUMENTS` is empty (cron mode):** behavior is unchanged — global `list_issues` for each phase.
 
 ## Phase loop
 
@@ -28,20 +33,26 @@ All phase transitions MUST comment-trail to issuesdb via `mcp__issuesdb__add_com
 
 ### Phase 1 — GROOM
 
-**If `scoped_issue_id` is set (scoped mode):**
+**If in scoped mode (`bundle_ids` set):**
 
-1. `mcp__issuesdb__get_issue(id=scoped_issue_id)` — verify the issue exists, and is in an open state (if state is Ready or In-Progress, it's already groomed therefore this phase can be skipped)
-2. If not found: `mcp__issuesdb__add_comment(issue_id=scoped_issue_id, body="Orchestrator: invalid issue ID — not found.")`, exit.
-3. Dispatch a **general subagent** via the Task tool with this prompt:
+For each id in `bundle_ids` (process sequentially):
+1. `mcp__issuesdb__get_issue(id=id)` — if state is Ready or In-Progress, it is already groomed; skip subagent dispatch and keep in `bundle_ids`.
+2. If not found: `mcp__issuesdb__add_comment(issue_id=id, body="Orchestrator: invalid issue ID — not found.")`, remove from `bundle_ids`, continue.
+3. If open and needs grooming, dispatch a **general subagent** via the Task tool:
    ```
-   /groom-issue scoped_issue_id
+   /groom-issue <id>
    ```
 4. Parse the subagent's output for the `## RESULT` block:
-   - `status=ready` → continue to Phase 2 (carry `scoped_issue_id` as the triage/develop target)
-   - `status=needs-input` → `mcp__issuesdb__add_comment(issue_id=scoped_issue_id, body="Orchestrator: grooming paused — N questions need human input.")`, skip Phases 2-5, continue to Phase 6
-   - `status=closed` → skip Phases 2-5, continue to Phase 6
-   - `status=none` → exit (nothing to groom)
-5. If the subagent fails or times out: `mcp__issuesdb__add_comment(issue_id=scoped_issue_id, body="Orchestrator: grooming subagent failed. Will retry on next cycle.")`, exit.
+   - `status=ready` → keep in `bundle_ids`
+   - `status=needs-input` → `mcp__issuesdb__add_comment(issue_id=<id>, body="Orchestrator: grooming paused — N questions need human input.")`, remove from `bundle_ids`
+   - `status=closed` → remove from `bundle_ids`
+   - `status=none` → remove from `bundle_ids`
+5. If the subagent fails or times out: `mcp__issuesdb__add_comment(issue_id=<id>, body="Orchestrator: grooming subagent failed. Will retry on next cycle.")`, remove from `bundle_ids`.
+
+After processing all issues:
+- If `bundle_ids` is empty: exit.
+- If `len(bundle_ids) > 1`: `mcp__issuesdb__add_comment(issue_id=bundle_ids[0], body="Orchestrator: bundling <N> issues into single PR: #id1, #id2, ...")`
+- Continue to Phase 2.
 
 **Otherwise (global / cron mode):**
 
@@ -64,14 +75,14 @@ All phase transitions MUST comment-trail to issuesdb via `mcp__issuesdb__add_com
 
 **Find the issue to triage:**
 
-- **Scoped mode:** `Y = scoped_issue_id` (already confirmed ready from Phase 1). If Phase 1 did not produce `status=ready`, skip Phases 2-5 entirely and go to Phase 6.
+- **Scoped mode:** `Y = bundle_ids[0]` (primary issue, confirmed ready from Phase 1). If `bundle_ids` is empty after Phase 1, skip Phases 2-5 and go to Phase 6.
 - **Global/cron mode:** `mcp__issuesdb__list_issues(status="ready", limit=5)`. If no results, skip to Phase 3.
 
 **Classify impact tier** from the issue title and description:
 
-| Signal | Tier 1 — Low | Tier 2 — Medium | Tier 3 — High |
-|--------|-------------|-----------------|---------------|
-| **What** | Docs, typos, copy/cosmetic, simple config | Bug fixes, new features in non-critical paths | Auth, security, data integrity, API contracts, schema changes, perf-critical paths |
+| Signal   | Tier 1 — Low                                                                      | Tier 2 — Medium                               | Tier 3 — High                                                                      |
+| -------- | --------------------------------------------------------------------------------- | --------------------------------------------- | ---------------------------------------------------------------------------------- |
+| **What** | Docs, typos, copy/cosmetic, simple config, small bug fixes (2 or 3 lines of code) | Bug fixes, new features in non-critical paths | Auth, security, data integrity, API contracts, schema changes, perf-critical paths |
 
 When in doubt, go one tier higher. If the issue touches auth, user data, or external APIs anywhere in its call graph, use Tier 3. Post the classification immediately: `mcp__issuesdb__add_comment(issue_id=Y, body="Orchestrator: classified Tier N — <one-line reason>.")`
 
@@ -118,14 +129,20 @@ Dispatch with the issue body and the repo cwd. Parse the structured report for:
 
 Receives `Y` (issue id), `tier` (1/2/3), and `triage_report` from Phase 2.
 
-**If `scoped_issue_id` is set and Phase 2 did not clear the issue for development:** skip Phases 3–6.
+**If in scoped mode and Phase 2 did not clear the issue for development:** skip Phases 3–6.
 
-Dispatch `/work-issuesdb` with tier pre-provided so the subagent skips its own triage:
+Set issue status to in-progress. Dispatch `/work-issuesdb` with tier pre-provided so the subagent skips its own triage:
 
-**Tier 1 (scoped mode — always single issue):**
+**Tier 1 (scoped mode — single issue):**
 ```
 /work-issuesdb Y --tier 1
 ```
+
+**Tier 1 (scoped mode — bundle, `len(bundle_ids) > 1`):**
+```
+/work-issuesdb id1 id2 id3 --tier 1
+```
+Pass all IDs in `bundle_ids` as space-separated arguments.
 
 **Tier 1 (global/cron mode — single issue, no qualifying peers):**
 ```
@@ -158,8 +175,11 @@ Parse the subagent's output for the `## RESULT` block. Save these values for sub
 - `security_findings` (none|N non-critical|N critical)
 - `status` (done|blocked|partial)
 
-If `status=blocked` or `pr_url="none"`: `mcp__issuesdb__add_comment(issue_id=Y, body="Orchestrator: development blocked — see subagent output.")`, exit.
-If `status=done` or `status=partial`: continue to Phase 4.
+If `status=blocked` or `pr_url="none"`:
+- `mcp__issuesdb__add_comment(issue_id=Y, body="Orchestrator: development blocked — see subagent output.")`, exit.
+If `status=done` or `status=partial`:
+- For each id in `bundle_ids`: `mcp__issuesdb__update_issue(id=<id>, pull_request=<pr_url>)` to set the PR URL on the issue record.
+- continue to Phase 4.
 
 ---
 
@@ -176,15 +196,9 @@ Review is only applicable if the development phase produced a PR and the tier is
    - Skip to Phase 5 (merge will be blocked).
 
 3. **If tier == 2 or tier == 3 and tests_pass is true:**
-   - Fetch the PR diff: `gh pr diff <pr_url>`
-   - Construct a self-contained review prompt that includes:
-     - The issue title and description
-     - The full PR diff
-     - Instructions to find critical vulnerabilities, non-critical security issues, bugs, and code quality problems
-     - Instruction to output findings in a structured format
-   - Run the review via bash, using a **different LLM model** for independent signal:
+   - Run the review via bash, using a **different LLM model** for independent signal (opencode uses `gh` CLI to fetch the PR):
      ```bash
-     opencode run --agent plan -m opencode/deepseek-v4-flash-free "<review prompt>" 2>&1
+     opencode run --agent plan -m opencode-go/deepseek-v4-pro "/review <pr_url>" 2>&1
      ```
    - **If `opencode` is not available** (command not found): skip review and comment "Orchestrator: review skipped — opencode CLI not available."
    - Parse the review output for findings:

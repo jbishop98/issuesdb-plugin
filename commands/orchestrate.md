@@ -80,9 +80,9 @@ After processing all issues:
 
 **Classify impact tier** from the issue title and description:
 
-| Signal | Tier 1 — Low | Tier 2 — Medium | Tier 3 — High |
-|--------|-------------|-----------------|---------------|
-| **What** | Docs, typos, copy/cosmetic, simple config | Bug fixes, new features in non-critical paths | Auth, security, data integrity, API contracts, schema changes, perf-critical paths |
+| Signal   | Tier 1 — Low                                                                      | Tier 2 — Medium                               | Tier 3 — High                                                                      |
+| -------- | --------------------------------------------------------------------------------- | --------------------------------------------- | ---------------------------------------------------------------------------------- |
+| **What** | Docs, typos, copy/cosmetic, simple config, small bug fixes (2 or 3 lines of code) | Bug fixes, new features in non-critical paths | Auth, security, data integrity, API contracts, schema changes, perf-critical paths |
 
 When in doubt, go one tier higher. If the issue touches auth, user data, or external APIs anywhere in its call graph, use Tier 3. Post the classification immediately: `mcp__issuesdb__add_comment(issue_id=Y, body="Orchestrator: classified Tier N — <one-line reason>.")`
 
@@ -175,8 +175,11 @@ Parse the subagent's output for the `## RESULT` block. Save these values for sub
 - `security_findings` (none|N non-critical|N critical)
 - `status` (done|blocked|partial)
 
-If `status=blocked` or `pr_url="none"`: `mcp__issuesdb__add_comment(issue_id=Y, body="Orchestrator: development blocked — see subagent output.")`, exit.
-If `status=done` or `status=partial`: continue to Phase 4.
+If `status=blocked` or `pr_url="none"`:
+- `mcp__issuesdb__add_comment(issue_id=Y, body="Orchestrator: development blocked — see subagent output.")`, exit.
+If `status=done` or `status=partial`:
+- For each id in `bundle_ids`: `mcp__issuesdb__update_issue(id=<id>, pull_request=<pr_url>)` to set the PR URL on the issue record.
+- continue to Phase 4.
 
 ---
 
@@ -195,7 +198,7 @@ Review is only applicable if the development phase produced a PR and the tier is
 3. **If tier == 2 or tier == 3 and tests_pass is true:**
    - Run the review via bash, using a **different LLM model** for independent signal (opencode uses `gh` CLI to fetch the PR):
      ```bash
-     opencode run --agent plan -m opencode-go/deepseek-v4-pro "<pr_url>" 2>&1
+     opencode run --agent plan -m opencode-go/deepseek-v4-pro "/review <pr_url>" 2>&1
      ```
    - **If `opencode` is not available** (command not found): skip review and comment "Orchestrator: review skipped — opencode CLI not available."
    - Parse the review output for findings:
