@@ -1,12 +1,14 @@
 ---
 name: groom-issue
 description: >
-  Groom an issuesdb issue — clarify scope, acceptance criteria, and readiness for implementation
+  Groom an issue from the issuesdb tracker (any project) — clarify scope, acceptance criteria, and readiness for implementation
 ---
 
-# Groom an issuesdb issue
+# Groom an issue tracked in issuesdb
 
 Take a raw issue and turn it into something an implementer (human or agent) can act on without guessing.
+
+> **issuesdb is the tracker, not the target codebase.** It stores issues for many projects (rentaway, SRApp, SROps, finops, stylerotate-wishlist, and the issuesdb app itself). The issue you're grooming belongs to *one* of those projects — identified by its `project` field. All codebase work happens in *that* project's repo, never in the issuesdb app repo (unless `project == "issuesdb"`).
 
 **Groomed issues are marked with `status=ready`.** Ungroomed issues have `status=open`. This is the queue — grooming one removes it from the ungroomed list and makes it visible to `/work-issuesdb`.
 
@@ -20,6 +22,7 @@ Take a raw issue and turn it into something an implementer (human or agent) can 
 
 ### 1. Load context
 - `mcp__issuesdb__get_issue` for the issue.
+- **Resolve the target repo from the issue's `project` field.** Map it to its directory under `/Users/jared/dev/` (e.g. `rentaway` → `/Users/jared/dev/rentaway`, `SRApp` → `/Users/jared/dev/SRApp`, `issuesdb` → `/Users/jared/dev/issuesdb`). This is the only repo step 3 may scan. Do not investigate the issuesdb app repo for an issue whose `project` is anything other than `issuesdb`, no matter how much issuesdb context is in scope.
 - Read existing comments. Note any prior questions, decisions, or attempts.
 
 ### 2. Assess as-is
@@ -34,6 +37,7 @@ Score the issue on these dimensions and call out gaps:
 - **Risk**: data migrations, security surface, breaking changes, public API.
 
 ### 3. Investigate the codebase
+- Work inside the repo resolved in step 1 (the issue's `project`), not whatever repo happens to be in your working directory or context.
 - Spend a small budget here — locate the touchpoints the issue likely affects.
 - Note any non-obvious constraints: existing abstractions, feature flags, tests that lock behavior in place.
 - Do NOT change code. Grooming is read-only.
