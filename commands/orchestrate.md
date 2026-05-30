@@ -108,7 +108,18 @@ Continue to Phase 3.
 
 > The orchestrator invokes the `issue-triage` **agent** directly (not the `/triage-issue` skill) because it needs the full structured report — touchpoints and risk_flags — to forward into development, not just a tier verdict. `/triage-issue` is for standalone human-driven routing.
 
-Dispatch with the issue body and the repo cwd. Tell the agent to **validate and extend** the `## Touchpoints` section grooming already wrote into the issue body, rather than rebuilding it from scratch. Parse the structured report for:
+Dispatch with the **full issue content inline** (title, description, and comments — you already have this from the Phase 1 `get_issue` call) plus the repo cwd. Pass it as:
+
+```
+Issue #<Y> — <title>
+
+<full description>
+
+--- comments ---
+<each comment body in order>
+```
+
+The agent will skip its own `get_issue` fetch when content is provided this way. Also tell the agent to **validate and extend** the `## Touchpoints` section grooming already wrote into the issue body, rather than rebuilding it from scratch. Parse the structured report for:
 - `ambiguities` — blocking questions that must be answered before code can be written
 - `touchpoints` — files/modules most likely to change
 - `risk_flags` — data migrations, auth surface, breaking changes, shared infra
@@ -135,16 +146,27 @@ Receives `Y` (issue id), `tier` (1/2/3), and `triage_report` from Phase 2.
 
 **If in scoped mode and Phase 2 did not clear the issue for development:** skip Phases 3–6.
 
-Set issue status to in-progress. Dispatch `/work-issuesdb` with the tier pre-provided so the subagent skips its own triage. **A single issue is just a one-element bundle** — one dispatch rule covers all modes:
+Set issue status to in-progress. Dispatch `/work-issuesdb` with the tier pre-provided so the subagent skips its own triage. **A single issue is just a one-element bundle** — one dispatch rule covers all modes.
+
+Always include the **full issue content inline** for each id in `bundle_ids` — you already have this from earlier fetches; passing it means the subagent skips its own `get_issue` calls:
+
+```
+Issue #<id> — <title>
+<description>
+--- comments ---
+<comments>
+```
 
 **Tier 1** (no `triage_report`):
 ```
 /work-issuesdb <space-separated bundle_ids> --tier 1
+<inline issue content for each id>
 ```
 
 **Tier 2 / Tier 3** — also forward the triage context so the subagent uses it as its starting map instead of re-scanning the codebase from scratch:
 ```
 /work-issuesdb <space-separated bundle_ids> --tier <tier>
+<inline issue content for each id>
 Touchpoints from triage:
 - <path> — <role>
 - ...

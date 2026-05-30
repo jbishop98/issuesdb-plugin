@@ -36,7 +36,7 @@ Classify the issue before starting. This gates how much rigor to apply in each s
 ### 1. Select the issue
 - Parse `$ARGUMENTS`: extract one or more `issue_id`s and optional `--tier N`. If `--tier N` is present, set `provided_tier = N`; otherwise `provided_tier = null`.
 - Set `issue_ids = [all extracted ids]`, `primary_id = issue_ids[0]`.
-- If `issue_ids` is non-empty: `mcp__issuesdb__get_issue` for each id in `issue_ids`.
+- If `issue_ids` is non-empty: use inline issue content if the orchestrator provided it (it already fetched the issue — re-fetching is redundant). Only call `mcp__issuesdb__get_issue` for ids whose content was not passed inline, or when running standalone.
 - Otherwise: `mcp__issuesdb__list_projects` then `mcp__issuesdb__list_issues` (status=ready). Pick the highest-priority issue that is **not** blocked, **not** already in-progress, and has a clear enough description to act on. Set `issue_ids = [picked_id]`, `primary_id = picked_id`. (`status=ready` means it has been groomed — ungroomed issues have `status=open` and should be run through `/groom-issue` first.)
 - **Bundle trust check**: bundles are only ever passed by the orchestrator, which already filtered them to Tier 1 and owns bundle composition. Trust the bundle — do **not** re-run full classification on each issue. If you happen to notice an obviously Tier 2+ issue while working it, drop just that one and log a warning comment on it ("Dropped from bundle — appears Tier 2+, will be worked separately."), then continue with the rest.
 - If nothing is actionable, STOP and report: "No actionable issues — top candidates: …" with a one-line reason for each.

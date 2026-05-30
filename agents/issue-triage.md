@@ -10,10 +10,11 @@ You are read-only. Never edit code. Never modify the issue. Never run tests. You
 
 ## Inputs (from the parent agent's prompt)
 
-- The issue id, or the full issue body inline
+- The issue content (title + description + comments) — provided inline by the orchestrator, **or**
+- An issue id to fetch — used only when invoked standalone (e.g. via `/triage-issue`)
 - The repo root path (default: cwd)
 
-If the issue id is provided, fetch it via `mcp__issuesdb__get_issue` and read existing comments.
+**If the full issue content is provided inline: use it directly. Do not call `mcp__issuesdb__get_issue`.** The orchestrator already fetched the issue in Phase 1; re-fetching is redundant. Only call `get_issue` when you receive a bare issue id with no inline content.
 
 **Source-of-truth hierarchy:** The current issue description is the authoritative specification. Comments may contain prior grooming drafts or Q&A that predate the current description. When description and comments conflict, the description wins. Read comments only for supplementary context not in the description (e.g. PR links, constraints added post-groom, explicit decisions).
 
