@@ -50,7 +50,7 @@ Classify the issue before starting. This gates how much rigor to apply in each s
 - **If `provided_tier` is set:** do not re-run triage tooling — the orchestrator has already run `issue-triage` and resolved ambiguities. If the dispatch prompt included **Touchpoints** and **risk flags** from triage, treat that list as your starting map for Step 6: run targeted grep checks on each listed path to confirm they're still current, then extend the list where the plan needs detail the triage list lacks. Do not scan the codebase from scratch.
 - **Tier 1:** Quick self-check — does the issue description have enough to act on? If yes, proceed.
 - **Tier 2–3:** Invoke the **`issue-triage`** subagent with the issue body. It returns: scope assessment, ambiguities, codebase touchpoints, risk flags.
-- If triage (any tier) flags the issue as ambiguous or under-specified, STOP and post the questions as a comment via `mcp__issuesdb__add_comment`. Do not start implementation.
+- If triage (any tier) flags the issue as ambiguous or under-specified, STOP: set `status=needs-input` via `mcp__issuesdb__update_issue`, post the questions as a comment via `mcp__issuesdb__add_comment`. Do not start implementation.
 
 ### 4. Plan
 - **Tier 1:** Write a brief inline plan (a few bullet points). Post as a comment.
