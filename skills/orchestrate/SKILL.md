@@ -27,7 +27,7 @@ Capture `$ARGUMENTS` and split by whitespace to get `scoped_ids` list.
 
 Execute each phase in order. If a phase has no work, skip to the next. If any phase completes successfully, continue to the next phase (don't exit early). Exit when all phases are exhausted or a hard stop is hit.
 
-All phase transitions MUST comment-trail to issuesdb via `mcp__issuesdb__add_comment`. Prefix comments with "Orchestrator:" so they are distinguishable from human comments.
+Comment-trail the **decisions** that matter for unattended visibility — tier classification, halt / needs-input, development blocked, and merge outcome. Skip purely procedural notes (e.g. "cleanup complete", "skipping review"). Prefix all comments with "Orchestrator:" so they're distinguishable from human comments.
 
 ---
 
@@ -80,11 +80,13 @@ After processing all issues:
 
 **Classify impact tier** from the issue title and description:
 
-| Signal   | Tier 1 — Low                                                                      | Tier 2 — Medium                               | Tier 3 — High                                                                      |
-| -------- | --------------------------------------------------------------------------------- | --------------------------------------------- | ---------------------------------------------------------------------------------- |
-| **What** | Docs, typos, copy/cosmetic, simple config, small bug fixes (2 or 3 lines of code) | Bug fixes, new features in non-critical paths | Auth, security, data integrity, API contracts, schema changes, perf-critical paths |
+| Signal   | Tier 1 — Low                              | Tier 2 — Medium                               | Tier 3 — High                                                                      |
+| -------- | ----------------------------------------- | --------------------------------------------- | ---------------------------------------------------------------------------------- |
+| **What** | Docs, typos, copy/cosmetic, simple config | Bug fixes, new features in non-critical paths | Auth, security, data integrity, API contracts, schema changes, perf-critical paths |
 
-When in doubt, go one tier higher. If the issue touches auth, user data, or external APIs anywhere in its call graph, use Tier 3. Post the classification immediately: `mcp__issuesdb__add_comment(issue_id=Y, body="Orchestrator: classified Tier N — <one-line reason>.")`
+> Tier definitions are **canonical in the `triage-issue` skill** — keep this table in sync with it.
+
+When in doubt, go one tier higher. If the issue touches auth, user data, payments, or external APIs anywhere in its call graph, use Tier 3. Post the classification immediately: `mcp__issuesdb__add_comment(issue_id=Y, body="Orchestrator: classified Tier N — <one-line reason>.")`
 
 **Ingest the md context files from the relevant project** so you can issue special instructions to the development subagent where applicable.
 
@@ -104,7 +106,9 @@ Continue to Phase 3.
 
 **Tier 2–3 — invoke the `issue-triage` subagent:**
 
-Dispatch with the issue body and the repo cwd. Parse the structured report for:
+> The orchestrator invokes the `issue-triage` **agent** directly (not the `/triage-issue` skill) because it needs the full structured report — touchpoints and risk_flags — to forward into development, not just a tier verdict. `/triage-issue` is for standalone human-driven routing.
+
+Dispatch with the issue body and the repo cwd. Tell the agent to **validate and extend** the `## Touchpoints` section grooming already wrote into the issue body, rather than rebuilding it from scratch. Parse the structured report for:
 - `ambiguities` — blocking questions that must be answered before code can be written
 - `touchpoints` — files/modules most likely to change
 - `risk_flags` — data migrations, auth surface, breaking changes, shared infra
@@ -131,40 +135,20 @@ Receives `Y` (issue id), `tier` (1/2/3), and `triage_report` from Phase 2.
 
 **If in scoped mode and Phase 2 did not clear the issue for development:** skip Phases 3–6.
 
-Set issue status to in-progress. Dispatch `/work-issuesdb` with tier pre-provided so the subagent skips its own triage:
+Set issue status to in-progress. Dispatch `/work-issuesdb` with the tier pre-provided so the subagent skips its own triage. **A single issue is just a one-element bundle** — one dispatch rule covers all modes:
 
-**Tier 1 (scoped mode — single issue):**
+**Tier 1** (no `triage_report`):
 ```
-/work-issuesdb Y --tier 1
-```
-
-**Tier 1 (scoped mode — bundle, `len(bundle_ids) > 1`):**
-```
-/work-issuesdb id1 id2 id3 --tier 1
-```
-Pass all IDs in `bundle_ids` as space-separated arguments.
-
-**Tier 1 (global/cron mode — single issue, no qualifying peers):**
-```
-/work-issuesdb Y --tier 1
+/work-issuesdb <space-separated bundle_ids> --tier 1
 ```
 
-**Tier 1 (global/cron mode — bundle, `len(bundle_ids) > 1`):**
+**Tier 2 / Tier 3** — also forward the triage context so the subagent uses it as its starting map instead of re-scanning the codebase from scratch:
 ```
-/work-issuesdb id1 id2 id3 --tier 1
-```
-Pass all IDs in `bundle_ids` as space-separated arguments.
-
-**Tier 2:**
-```
-/work-issuesdb Y --tier 2
-```
-
-**Tier 3** — also forward the triage context to orient the subagent:
-```
-/work-issuesdb Y --tier 3
+/work-issuesdb <space-separated bundle_ids> --tier <tier>
+Touchpoints from triage:
+- <path> — <role>
+- ...
 Key risk flags from triage: <risk_flags summary>
-Touchpoints: <touchpoints list>
 ```
 
 Parse the subagent's output for the `## RESULT` block. Save these values for subsequent phases:
@@ -187,9 +171,10 @@ If `status=done` or `status=partial`:
 
 Review is only applicable if the development phase produced a PR and the tier is 2 or 3. Tier 1 skips review entirely.
 
+> This opencode pass is the **authoritative independent security/code review** for Tier 2–3. `/work-issuesdb` deliberately does **not** spawn its own review subagent (it does only a cheap inline self-scan), so this phase is not redundant — it is the one heavyweight review, run on the real PR diff with a different model.
+
 1. **If tier == 1:**
-   - `mcp__issuesdb__add_comment(issue_id=Y, body="Orchestrator: Tier 1 — skipping review, eligible for auto-merge.")`
-   - Skip to Phase 5.
+   - Skip to Phase 5 (Tier 1 is review-exempt; the merge comment records the outcome).
 
 2. **If tier == 2 or tier == 3 and tests_pass is false:**
    - `mcp__issuesdb__add_comment(issue_id=Y, body="Orchestrator: tests failed — review skipped. Fix before merge.")`
@@ -260,7 +245,7 @@ Detect and clean up one merged branch per invocation.
 6. Close issues:
    - If `bundle_ids` is available from this invocation's Phase 3 RESULT: close each id in `bundle_ids`.
    - Otherwise (cross-invocation cleanup): close only the primary `<id>` parsed from the branch name.
-   - For each id being closed: `mcp__issuesdb__update_issue(<id>, status="closed")` and `mcp__issuesdb__add_comment(issue_id=<id>, body="Orchestrator: cleanup complete — branch deleted, issue closed.")`
+   - For each id being closed: `mcp__issuesdb__update_issue(<id>, status="closed")`. (No separate "cleanup complete" comment — the status change is the trail.)
 7. Exit.
 
 ## Guardrails
