@@ -137,19 +137,19 @@ Receives `Y` (issue id), `tier` (1/2/3), and `triage_report` from Phase 2.
 
 Set issue status to in-progress. Dispatch `/work-issuesdb` with the tier pre-provided so the subagent skips its own triage. **A single issue is just a one-element bundle** — one dispatch rule covers all modes:
 
+**Tier 1** (no `triage_report`):
 ```
-/work-issuesdb <space-separated bundle_ids> --tier <tier>
+/work-issuesdb <space-separated bundle_ids> --tier 1
 ```
 
-**Tier 2 and Tier 3** — also forward the triage context so the subagent uses it as its starting map instead of re-scanning the codebase from scratch:
-
+**Tier 2 / Tier 3** — also forward the triage context so the subagent uses it as its starting map instead of re-scanning the codebase from scratch:
 ```
 /work-issuesdb <space-separated bundle_ids> --tier <tier>
-Touchpoints from triage: <touchpoints list>
+Touchpoints from triage:
+- <path> — <role>
+- ...
 Key risk flags from triage: <risk_flags summary>
 ```
-
-(Tier 1 has no `triage_report` — dispatch the bare command.)
 
 Parse the subagent's output for the `## RESULT` block. Save these values for subsequent phases:
 - `tier` (1|2|3)

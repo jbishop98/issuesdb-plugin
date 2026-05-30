@@ -46,7 +46,7 @@ Classify the issue before starting. This gates how much rigor to apply in each s
 - **Otherwise:** assign a tier (1/2/3) using the table above. State it explicitly: "**Tier N — reason**". This determines steps 3–7.
 
 ### 3. Triage / pre-flight
-- **If `provided_tier` is set:** skip this step entirely — the orchestrator has already run `issue-triage` and resolved ambiguities. If the dispatch prompt included **Touchpoints** and **risk flags** from triage, treat that list as your starting map for Step 6 — do not re-scan the codebase from scratch; only extend it where the plan needs detail the triage list lacks.
+- **If `provided_tier` is set:** do not re-run triage tooling — the orchestrator has already run `issue-triage` and resolved ambiguities. If the dispatch prompt included **Touchpoints** and **risk flags** from triage, treat that list as your starting map for Step 6: run targeted grep checks on each listed path to confirm they're still current, then extend the list where the plan needs detail the triage list lacks. Do not scan the codebase from scratch.
 - **Tier 1:** Quick self-check — does the issue description have enough to act on? If yes, proceed.
 - **Tier 2–3:** Invoke the **`issue-triage`** subagent with the issue body. It returns: scope assessment, ambiguities, codebase touchpoints, risk flags.
 - If triage (any tier) flags the issue as ambiguous or under-specified, STOP and post the questions as a comment via `mcp__issuesdb__add_comment`. Do not start implementation.
@@ -75,7 +75,7 @@ Classify the issue before starting. This gates how much rigor to apply in each s
 ### 8. Security review
 - **Tier 1:** Skip.
 - **Tier 2–3:** Inline self-scan of the diff (no subagent): scan for injection vectors, exposed secrets, broken access checks, and — for Tier 3 — auth, data-integrity, and API-contract regressions.
-- **Do NOT spawn a `code-reviewer` / `security-review` subagent here.** When run under the orchestrator, an independent different-model review runs on the actual PR diff in the orchestrator's review phase; a nested review subagent would duplicate that pass and add a cold-start. This inline self-scan is the only review `/work-issuesdb` performs — it is the safety net for standalone runs, not a full review.
+- **Never spawn a `code-reviewer` / `security-review` subagent from within `/work-issuesdb`, regardless of context.** When run under the orchestrator, an independent different-model review runs on the actual PR diff in the orchestrator's review phase; a nested review subagent would duplicate that pass and add a cold-start. This inline self-scan is the only review `/work-issuesdb` performs — it is the safety net for standalone runs, not a full review.
 - For any **critical** findings (any tier): fix them before proceeding. Do not open the PR with known critical issues.
 - For any **non-critical** findings and any **bugs** surfaced during review: log each as a separate issue via `mcp__issuesdb__create_issue`. Include the finding details, affected file/line, and a reference to the current issue id. Do not block the PR on these.
 
@@ -86,7 +86,7 @@ Classify the issue before starting. This gates how much rigor to apply in each s
 - For **each** id in `issue_ids`:
   1. `mcp__issuesdb__update_issue` — set `status=in-review`.
   2. `mcp__issuesdb__add_comment` — post the PR URL as a comment, e.g. "PR opened: <url>".
-- Do **not** also append the PR URL to the issue `description`. The orchestrator records it in the structured `pull_request` field (queryable); the comment above is the human-readable trail. Duplicating it into the description is redundant.
+  3. **Do NOT** also update the issue `description` to append the PR URL — for any id. The issuesdb system records it in the structured `pull_request` field (queryable); the comment is the human-readable trail. Duplicating it into the description is redundant.
 
 ### 10. Report structured result
 - Do NOT merge — the orchestrator (or human) handles merge policy separately.
