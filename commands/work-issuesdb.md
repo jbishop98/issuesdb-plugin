@@ -25,9 +25,11 @@ Classify the issue before starting. This gates how much rigor to apply in each s
 | **Triage** | Quick self-check only | Full `issue-triage` subagent | Full `issue-triage` subagent |
 | **Plan** | Inline comment only | `superpowers:writing-plans` | `superpowers:brainstorming` + `superpowers:writing-plans` |
 | **Verify** | Run tests for affected files only | Full suite + lints + types | Full suite + lints + types + manually describe edge cases |
-| **Security review** | Skip | Self-review: scan diff for injection, exposure, or broken access | Full `superpowers:code-reviewer` subagent security scan |
+| **Security review** | Skip | Inline self-scan of the diff | Inline self-scan of the diff (no review subagent — see step 8) |
 
 **When in doubt, go one tier higher.** If the issue touches auth, user data, payments, or external APIs anywhere in its call graph, use Tier 3 regardless of how small the change looks.
+
+> Tier definitions are **canonical in the `triage-issue` skill** — keep this table in sync with it.
 
 ## Steps
 
@@ -36,7 +38,7 @@ Classify the issue before starting. This gates how much rigor to apply in each s
 - Set `issue_ids = [all extracted ids]`, `primary_id = issue_ids[0]`.
 - If `issue_ids` is non-empty: `mcp__issuesdb__get_issue` for each id in `issue_ids`.
 - Otherwise: `mcp__issuesdb__list_projects` then `mcp__issuesdb__list_issues` (status=ready). Pick the highest-priority issue that is **not** blocked, **not** already in-progress, and has a clear enough description to act on. Set `issue_ids = [picked_id]`, `primary_id = picked_id`. (`status=ready` means it has been groomed — ungroomed issues have `status=open` and should be run through `/groom-issue` first.)
-- **Bundle safety check**: if `len(issue_ids) > 1`, verify all issues look like Tier 1 (docs, typos, copy, simple config). If any issue shows Tier 2+ signals, drop it from the bundle and log a warning comment on that issue: "Orchestrator: dropped from bundle — issue appears to be Tier 2+, will be worked separately."
+- **Bundle trust check**: bundles are only ever passed by the orchestrator, which already filtered them to Tier 1 and owns bundle composition. Trust the bundle — do **not** re-run full classification on each issue. If you happen to notice an obviously Tier 2+ issue while working it, drop just that one and log a warning comment on it ("Dropped from bundle — appears Tier 2+, will be worked separately."), then continue with the rest.
 - If nothing is actionable, STOP and report: "No actionable issues — top candidates: …" with a one-line reason for each.
 
 ### 2. Classify impact
@@ -44,7 +46,7 @@ Classify the issue before starting. This gates how much rigor to apply in each s
 - **Otherwise:** assign a tier (1/2/3) using the table above. State it explicitly: "**Tier N — reason**". This determines steps 3–7.
 
 ### 3. Triage / pre-flight
-- **If `provided_tier` is set:** skip this step entirely — the orchestrator has already run `issue-triage` and resolved ambiguities.
+- **If `provided_tier` is set:** skip this step entirely — the orchestrator has already run `issue-triage` and resolved ambiguities. If the dispatch prompt included **Touchpoints** and **risk flags** from triage, treat that list as your starting map for Step 6 — do not re-scan the codebase from scratch; only extend it where the plan needs detail the triage list lacks.
 - **Tier 1:** Quick self-check — does the issue description have enough to act on? If yes, proceed.
 - **Tier 2–3:** Invoke the **`issue-triage`** subagent with the issue body. It returns: scope assessment, ambiguities, codebase touchpoints, risk flags.
 - If triage (any tier) flags the issue as ambiguous or under-specified, STOP and post the questions as a comment via `mcp__issuesdb__add_comment`. Do not start implementation.
@@ -72,8 +74,8 @@ Classify the issue before starting. This gates how much rigor to apply in each s
 
 ### 8. Security review
 - **Tier 1:** Skip.
-- **Tier 2:** Self-review the diff: scan for injection vectors, exposed secrets, broken access checks. If anything looks off, bump to Tier 3 handling.
-- **Tier 3:** Spawn a `superpowers:code-reviewer` subagent focused on security, scoped to the changes in the worktree. Ask it to identify critical vulnerabilities, non-critical security issues, and bugs. It must report findings back — do not invoke `security-review` as a top-level skill (that ends the session).
+- **Tier 2–3:** Inline self-scan of the diff (no subagent): scan for injection vectors, exposed secrets, broken access checks, and — for Tier 3 — auth, data-integrity, and API-contract regressions.
+- **Do NOT spawn a `code-reviewer` / `security-review` subagent here.** When run under the orchestrator, an independent different-model review runs on the actual PR diff in the orchestrator's review phase; a nested review subagent would duplicate that pass and add a cold-start. This inline self-scan is the only review `/work-issuesdb` performs — it is the safety net for standalone runs, not a full review.
 - For any **critical** findings (any tier): fix them before proceeding. Do not open the PR with known critical issues.
 - For any **non-critical** findings and any **bugs** surfaced during review: log each as a separate issue via `mcp__issuesdb__create_issue`. Include the finding details, affected file/line, and a reference to the current issue id. Do not block the PR on these.
 
@@ -84,7 +86,7 @@ Classify the issue before starting. This gates how much rigor to apply in each s
 - For **each** id in `issue_ids`:
   1. `mcp__issuesdb__update_issue` — set `status=in-review`.
   2. `mcp__issuesdb__add_comment` — post the PR URL as a comment, e.g. "PR opened: <url>".
-  3. `mcp__issuesdb__update_issue` — append the PR URL to the issue `description`, e.g. add a line "PR: <url>" at the end.
+- Do **not** also append the PR URL to the issue `description`. The orchestrator records it in the structured `pull_request` field (queryable); the comment above is the human-readable trail. Duplicating it into the description is redundant.
 
 ### 10. Report structured result
 - Do NOT merge — the orchestrator (or human) handles merge policy separately.

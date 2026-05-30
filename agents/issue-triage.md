@@ -32,6 +32,8 @@ List concrete questions that *must* be answered before code can be written. Each
 ### 3. Codebase touchpoints
 The files/modules most likely to change. For each: path + one line on its current role + what the change probably looks like there. Do this by grepping for relevant identifiers, not by guessing.
 
+**If the issue body already has a `## Touchpoints` section** (grooming wrote one), start from it: confirm each entry still resolves, correct anything stale, and add what's missing. Validate and extend — don't rebuild the list from scratch.
+
 ### 4. Risk flags
 Surface anything that should slow the parent agent down:
 - Data migrations or schema changes
