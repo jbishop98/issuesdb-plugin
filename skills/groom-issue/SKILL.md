@@ -69,7 +69,7 @@ Draft an updated issue body with these sections:
 ### 5. Decide readiness
 Pick one:
 - **Ready** — no open questions, criteria are testable. Update the issue body via `mcp__issuesdb__update_issue` with the groomed content **and set `status=ready`**. This removes it from the ungroomed queue and queues it for implementation. If there are existing comments on the issue (i.e., this completes a "needs input" cycle), also call `mcp__issuesdb__add_comment` with: "Grooming complete — description updated above. Earlier comments reflect pre-clarification Q&A and may be superseded."
-- **Needs input** — open questions remain. Post the groomed draft *as a comment* via `mcp__issuesdb__add_comment` with the questions surfaced at the top, and tag the requester. Leave `status=open` so it stays in the queue. Don't overwrite the issue body until questions are answered. Comment bodies render as **markdown** in the web UI — use headers, bullets, and code spans freely.
+- **Needs input** — open questions remain. Post the groomed draft *as a comment* via `mcp__issuesdb__add_comment` with the questions surfaced at the top, and tag the requester. Set `status=needs-input` via `mcp__issuesdb__update_issue` — this surfaces the card as flagged on the Kanban board so a human knows input is required. Don't overwrite the issue body until questions are answered. Comment bodies render as **markdown** in the web UI — use headers, bullets, and code spans freely.
 - **Reject / duplicate / won't-fix** — explain in a comment, link related issues, propose closing. Set `status=closed`.
 
 ### 6. Report
