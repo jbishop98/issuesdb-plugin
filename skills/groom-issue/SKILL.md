@@ -14,9 +14,24 @@ Take a raw issue and turn it into something an implementer (human or agent) can 
 
 ## Inputs
 
-- `$ARGUMENTS` — the issuesdb issue id. Optional.
-  - **If provided:** groom that specific issue.
-  - **If empty:** auto-select the highest-priority issue via `mcp__issuesdb__list_issues(status=open, limit=1)`. If zero results, output "**RESULT: none**" and exit. If running interactively (user present), you may ask which one to groom before proceeding. If running unattended, auto-select without prompting.
+- `$ARGUMENTS` — one or more space-separated issuesdb issue IDs, or empty.
+  - **Multiple IDs:** run in batch mode (see below).
+  - **Single ID:** groom that specific issue.
+  - **Empty:** auto-select the highest-priority issue via `mcp__issuesdb__list_issues(status=open, limit=1)`. If zero results, output "**RESULT: none**" and exit. If running interactively (user present), you may ask which one to groom before proceeding. If running unattended, auto-select without prompting.
+
+## Batch mode
+
+When multiple IDs are passed:
+
+1. Parse IDs from `$ARGUMENTS` (split on whitespace).
+2. Fetch each via `mcp__issuesdb__get_issue` — skip any not found (log which ones were dropped).
+3. Skip any already at `status=ready` or `status=in-progress`; they are already groomed.
+4. For each remaining ID, dispatch a Task subagent with the prompt `/groom-issue <id>`. Fire all dispatches concurrently.
+5. Collect the `## RESULT` block from each subagent's output.
+6. Output one `## RESULT` block per issue in order (see Structured output).
+7. Send a single summary PushNotification: `"Groomed N issues: X ready, Y needs-input."` — skip per-issue notifications in batch mode.
+
+Single-ID and auto-select behavior is unchanged.
 
 ## Steps
 
@@ -86,8 +101,9 @@ This requires Remote Control + "Push when Claude decides" enabled in the Claude.
 
 ## Structured output
 
-At the very end of your response, output a machine-parseable result block so orchestrators can consume the outcome. Use exactly this format:
+At the very end of your response, output a machine-parseable result block so orchestrators can consume the outcome.
 
+**Single-issue mode** — one block:
 ```
 ## RESULT
 - status: <ready|needs-input|closed|none>
@@ -95,7 +111,19 @@ At the very end of your response, output a machine-parseable result block so orc
 - questions: <N> (only when status=needs-input)
 ```
 
-Do not include any other text in the RESULT block. Output it as the last thing before the final newline.
+**Batch mode** — one block per issue in ID order, separated by a blank line:
+```
+## RESULT
+- status: ready
+- issue_id: 42
+
+## RESULT
+- status: needs-input
+- issue_id: 43
+- questions: 2
+```
+
+Do not include any other text after the first `## RESULT` block.
 
 ## Guardrails
 
