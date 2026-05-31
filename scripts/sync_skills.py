@@ -5,7 +5,7 @@ Reads .md files from commands/ and writes them as SKILL.md files under
 the specified target directory, converting frontmatter as needed.
 
 Usage:
-    python scripts/sync_skills.py [--dry-run] [--delete-removed] [--target target]
+    python scripts/sync_skills.py [--dry-run] [--delete-removed] [--target target] [--source source]
 """
 
 import argparse
@@ -20,6 +20,22 @@ PLUGIN_SKILLS_DIR = PLUGIN_DIR / "skills"
 DEFAULT_SKILLS_DIR = Path.home() / ".claude" / "skills"
 ANTIGRAVITY_SKILLS_DIR = Path.home() / ".gemini" / "antigravity" / "skills"
 OPENCODE_SKILLS_DIR = Path.home() / ".config" / "opencode" / "skills"
+
+# Agents are authored once in agents/ (Claude Code format) and fan out to each
+# platform's agent directory. Claude Code and Antigravity share the flat
+# `tools` allowlist format; OpenCode needs a `permission` map + full model id.
+AGENTS_DIR = PLUGIN_DIR / "agents"
+PLUGIN_AGENTS_DIR = AGENTS_DIR
+DEFAULT_AGENTS_DIR = Path.home() / ".claude" / "agents"
+ANTIGRAVITY_AGENTS_DIR = Path.home() / ".gemini" / "antigravity" / "agents"
+OPENCODE_AGENTS_DIR = Path.home() / ".config" / "opencode" / "agent"
+
+# Claude Code accepts model aliases; OpenCode wants a provider-qualified id.
+MODEL_ALIAS_TO_OPENCODE = {
+    "sonnet": "anthropic/claude-sonnet-4-20250514",
+    "opus": "anthropic/claude-opus-4-20250514",
+    "haiku": "anthropic/claude-haiku-4-20250514",
+}
 
 FRONTMATTER_RE = re.compile(r"^---\n(.*?)\n---\n?", re.DOTALL)
 
@@ -57,6 +73,84 @@ def build_skill_frontmatter(name: str, description: str) -> str:
         indented = "\n  ".join(description.splitlines())
         return f"---\nname: {name}\ndescription: >\n  {indented}\n---\n"
     return f"---\nname: {name}\ndescription: {description}\n---\n"
+
+
+def build_opencode_agent(fields: dict[str, str], body: str) -> str:
+    """Convert a Claude Code agent (flat `tools` allowlist) into an OpenCode
+    subagent definition (`permission` map + provider-qualified model)."""
+    description = fields.get("description", "").strip()
+    tools = {t.strip() for t in fields.get("tools", "").split(",") if t.strip()}
+
+    alias = fields.get("model", "sonnet").strip() or "sonnet"
+    model = MODEL_ALIAS_TO_OPENCODE.get(alias, alias)
+
+    lines = ["---", f"description: {description}", "mode: subagent", f"model: {model}"]
+
+    # Map the flat allowlist onto OpenCode's permission keys. Anything not
+    # granted in the source is denied. Bash is constrained to read-only git so
+    # read-only agents that carry Bash (for `git log`/`git diff`) stay read-only.
+    lines.append("permission:")
+    lines.append(f"  read: {'allow' if 'Read' in tools else 'deny'}")
+    lines.append(f"  edit: {'allow' if tools & {'Edit', 'Write'} else 'deny'}")
+    lines.append(f"  glob: {'allow' if 'Glob' in tools else 'deny'}")
+    lines.append(f"  grep: {'allow' if 'Grep' in tools else 'deny'}")
+    lines.append(f"  list: {'allow' if 'LS' in tools else 'deny'}")
+    if "Bash" in tools:
+        lines.append("  bash:")
+        lines.append('    "*": deny')
+        lines.append('    "git log*": allow')
+        lines.append('    "git diff*": allow')
+        lines.append('    "git status": allow')
+    else:
+        lines.append('  bash:')
+        lines.append('    "*": deny')
+    lines.append("---\n")
+
+    return "\n".join(lines) + body
+
+
+def sync_agents(agents_dir: Path, target: str, dry_run: bool = False) -> None:
+    """Fan agents/ out to a platform agent directory.
+
+    claude / antigravity → copied verbatim (shared flat `tools` format).
+    opencode             → frontmatter converted to a permission map.
+    plugin               → no-op (agents/ is the authoring source).
+    """
+    if target == "plugin":
+        print("  (plugin is the authoring source for agents — nothing to sync)")
+        return
+
+    agent_files = sorted(AGENTS_DIR.glob("*.md"))
+    if not agent_files:
+        print(f"No agent files found in {AGENTS_DIR}")
+        sys.exit(1)
+
+    for agent_path in agent_files:
+        name = agent_path.stem
+        text = agent_path.read_text()
+        fields, body = parse_frontmatter(text)
+
+        if not fields.get("description", "").strip():
+            print(f"  SKIP  {name}  (no description in frontmatter)")
+            continue
+
+        if target == "opencode":
+            new_content = build_opencode_agent(fields, body)
+        else:  # claude, antigravity — keep Claude Code format verbatim
+            new_content = text
+
+        out_path = agents_dir / f"{name}.md"
+        if out_path.exists() and out_path.read_text() == new_content:
+            print(f"  OK    {name}  (unchanged)")
+            continue
+        action = "UPDATE" if out_path.exists() else "ADD"
+        print(f"  {action}  {name}")
+        if not dry_run:
+            agents_dir.mkdir(parents=True, exist_ok=True)
+            out_path.write_text(new_content)
+
+    if dry_run:
+        print("\n(dry run — no files written)")
 
 
 def sync(skills_dir: Path, dry_run: bool = False, delete_removed: bool = False) -> None:
@@ -132,8 +226,23 @@ def main() -> None:
     parser.add_argument("--delete-removed", action="store_true",
                         help="Remove skills whose command file no longer exists (only if marker present)")
     parser.add_argument("--target", choices=["plugin", "opencode", "claude", "antigravity"], default="plugin",
-                        help="Target to sync skills to (choices: plugin, opencode, claude, antigravity; default: plugin)")
+                        help="Target to sync to (choices: plugin, opencode, claude, antigravity; default: plugin)")
+    parser.add_argument("--source", choices=["commands", "agents"], default="commands",
+                        help="What to sync: commands -> skills, or agents -> platform agent dirs (default: commands)")
     args = parser.parse_args()
+
+    if args.source == "agents":
+        agents_dirs = {
+            "plugin": PLUGIN_AGENTS_DIR,
+            "opencode": OPENCODE_AGENTS_DIR,
+            "antigravity": ANTIGRAVITY_AGENTS_DIR,
+            "claude": DEFAULT_AGENTS_DIR,
+        }
+        agents_dir = agents_dirs[args.target]
+        print(f"Source: {AGENTS_DIR}")
+        print(f"Target: {agents_dir}\n")
+        sync_agents(agents_dir, args.target, dry_run=args.dry_run)
+        return
 
     if args.target == "plugin":
         skills_dir = PLUGIN_SKILLS_DIR
