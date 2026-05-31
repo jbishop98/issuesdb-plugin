@@ -13,6 +13,12 @@ Space-separated issue IDs, a project name, or empty (full backlog).
 
 ## Steps
 
+### 0. Generate session filename
+
+Run `date +%Y%m%d-%H%M%S` via Bash and store the result as `session_ts`. All writes in this session use `~/dev/DELIVERY_PLAN-<session_ts>.md` as the plan path. Set this once at the start and never change it.
+
+---
+
 ### 1. Load issues
 - IDs provided → `mcp__issuesdb__get_issue` for each.
 - Project name → `mcp__issuesdb__list_issues(project=<name>)` for `status=open` and `status=ready`.
@@ -75,9 +81,9 @@ Order batches to:
 
 Keep rationale to one line. No preamble, no closing summary.
 
-**If no actionable issues were found** (all in-progress, all excluded from grooming assessment, or backlog empty): write `DELIVERY_PLAN.md` containing only `No actionable issues at this time.` and exit.
+**If no actionable issues were found** (all in-progress, all excluded from grooming assessment, or backlog empty): write the plan file containing only `No actionable issues at this time.` and exit.
 
-Write the completed plan to `~/dev/DELIVERY_PLAN.md` (always this fixed path, regardless of cwd). Always overwrite any existing file.
+Write the completed plan to `~/dev/DELIVERY_PLAN-<session_ts>.md`. Always overwrite any existing file at that path.
 
 ---
 
@@ -129,7 +135,7 @@ After all batches are complete (or skipped), append to DELIVERY_PLAN.md:
 - Next actions: <any human steps required>
 ```
 
-Print the path when done.
+Print the full plan path (`~/dev/DELIVERY_PLAN-<session_ts>.md`) when done.
 
 ## Hard rules
 - Never edit code or update issue fields directly — that is orchestrate's job.
