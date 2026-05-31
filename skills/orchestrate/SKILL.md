@@ -88,7 +88,9 @@ After processing all issues:
 
 When in doubt, go one tier higher. If the issue touches auth, user data, payments, or external APIs anywhere in its call graph, use Tier 3. Post the classification immediately: `mcp__issuesdb__add_comment(issue_id=Y, body="Orchestrator: classified Tier N — <one-line reason>.")`
 
-**Ingest the md context files from the relevant project** so you can issue special instructions to the development subagent where applicable.
+**Ingest project context** for the development subagent:
+- **If the dispatch prompt contains a "Context from delivery planning" block** (i.e. this invocation was triggered by the Pilot): use those notes as-is. Do not re-read CLAUDE.md or project files you already have — the Pilot pre-loaded them.
+- **Otherwise:** read the relevant project's CLAUDE.md and any key architectural notes so you can issue special instructions to the development subagent.
 
 **Tier 1 — skip triage subagent (global/cron mode: also discover bundle peers):**
 
