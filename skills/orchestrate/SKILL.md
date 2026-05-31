@@ -35,19 +35,19 @@ Comment-trail the **decisions** that matter for unattended visibility — tier c
 
 **If in scoped mode (`bundle_ids` set):**
 
-For each id in `bundle_ids` (process sequentially):
-1. `mcp__issuesdb__get_issue(id=id)` — if state is Ready or In-Progress, it is already groomed; skip subagent dispatch and keep in `bundle_ids`.
-2. If not found: `mcp__issuesdb__add_comment(issue_id=id, body="Orchestrator: invalid issue ID — not found.")`, remove from `bundle_ids`, continue.
-3. If open and needs grooming, dispatch a **general subagent** via the Task tool:
+1. Fetch each id via `mcp__issuesdb__get_issue`:
+   - Not found → comment "Orchestrator: invalid issue ID — not found.", remove from `bundle_ids`.
+   - `status=ready` or `status=in-progress` → already groomed, keep in `bundle_ids`, no dispatch needed.
+2. If any IDs still need grooming, dispatch a single **general subagent** via the Task tool:
    ```
-   /groom-issue <id>
+   /groom-issue <id1> <id2> ...
    ```
-4. Parse the subagent's output for the `## RESULT` block:
+   (space-separated IDs of all issues needing grooming — `groom-issue` processes them in parallel)
+3. Parse all `## RESULT` blocks from the subagent's output (one per issue):
    - `status=ready` → keep in `bundle_ids`
    - `status=needs-input` → `mcp__issuesdb__add_comment(issue_id=<id>, body="Orchestrator: grooming paused — N questions need human input.")`, remove from `bundle_ids`
    - `status=closed` → remove from `bundle_ids`
-   - `status=none` → remove from `bundle_ids`
-5. If the subagent fails or times out: `mcp__issuesdb__add_comment(issue_id=<id>, body="Orchestrator: grooming subagent failed. Will retry on next cycle.")`, remove from `bundle_ids`.
+4. If the subagent fails or times out: comment on each affected ID and remove from `bundle_ids`.
 
 After processing all issues:
 - If `bundle_ids` is empty: exit.
@@ -56,18 +56,20 @@ After processing all issues:
 
 **Otherwise (global / cron mode):**
 
-1. `mcp__issuesdb__list_issues(status="open", limit=1)`
+1. `mcp__issuesdb__list_issues(status="open", limit=4)`
 2. If no results: skip to Phase 2.
-3. If found with `id=X`: dispatch a **general subagent** via the Task tool with this prompt:
+3. If found: dispatch a single **general subagent** via the Task tool:
    ```
-   /groom-issue X
+   /groom-issue <id1> <id2> ...
    ```
-4. Parse the subagent's output for the `## RESULT` block:
-   - `status=ready` → continue to Phase 2
-   - `status=needs-input` → `mcp__issuesdb__add_comment(issue_id=X, body="Orchestrator: grooming paused — N questions need human input.")`, continue to Phase 2
-   - `status=closed` → continue to Phase 2
-   - `status=none` → exit (nothing to groom)
-5. If the subagent fails or times out: `mcp__issuesdb__add_comment(issue_id=X, body="Orchestrator: grooming subagent failed. Will retry on next cycle.")`, exit.
+   (space-separated IDs of all open issues found, up to 4 — `groom-issue` processes them in parallel)
+4. Parse all `## RESULT` blocks from the subagent's output (one per issue):
+   - `status=ready` → Phase 2 will pick it up from the ready queue naturally
+   - `status=needs-input` → `mcp__issuesdb__add_comment(issue_id=<id>, body="Orchestrator: grooming paused — N questions need human input.")`
+   - `status=closed` → no action needed
+   - `status=none` → exit (nothing was groomed)
+5. Continue to Phase 2.
+6. If the subagent fails or times out: `mcp__issuesdb__add_comment(issue_id=<first_id>, body="Orchestrator: grooming subagent failed. Will retry on next cycle.")`, exit.
 
 ---
 
@@ -88,9 +90,7 @@ After processing all issues:
 
 When in doubt, go one tier higher. If the issue touches auth, user data, payments, or external APIs anywhere in its call graph, use Tier 3. Post the classification immediately: `mcp__issuesdb__add_comment(issue_id=Y, body="Orchestrator: classified Tier N — <one-line reason>.")`
 
-**Ingest project context** for the development subagent:
-- **If the dispatch prompt contains a "Context from delivery planning" block** (i.e. this invocation was triggered by the Pilot): use those notes as-is. Do not re-read CLAUDE.md or project files you already have — the Pilot pre-loaded them.
-- **Otherwise:** read the relevant project's CLAUDE.md and any key architectural notes so you can issue special instructions to the development subagent.
+**Ingest the md context files from the relevant project** so you can issue special instructions to the development subagent where applicable.
 
 **Tier 1 — skip triage subagent (global/cron mode: also discover bundle peers):**
 
