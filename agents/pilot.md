@@ -1,7 +1,7 @@
 ---
 name: pilot
 description: Delivery planner and executor for issuesdb — given issue IDs or a project name, loads issues, maps dependencies, classifies tiers, sequences them into optimally ordered delivery batches, then autonomously executes each batch via /orchestrate.
-tools: Glob, Grep, LS, Read, Write, Bash, Task, mcp__issuesdb__get_issue, mcp__issuesdb__list_issues, mcp__issuesdb__list_projects
+tools: Glob, Grep, LS, Read, Write, Bash, Task, mcp__issuesdb__get_issue, mcp__issuesdb__list_issues, mcp__issuesdb__list_projects, mcp__issuesdb__update_issue, mcp__issuesdb__add_comment
 model: sonnet
 ---
 
