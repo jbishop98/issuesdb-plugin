@@ -109,6 +109,7 @@ For each batch:
 
    <context block from step 2>
    ```
+   **NEVER substitute `/work-issuesdb` here.** `/orchestrate` owns the full pipeline: groom → triage → develop → code review → security review → merge → cleanup. Calling `/work-issuesdb` directly skips triage, code review, and security review entirely — those phases only exist inside orchestrate.
 
 4. **Wait for completion.** Scan the subagent's final output for:
    - PR URL (success signal)
@@ -139,6 +140,16 @@ Print the full plan path (`~/dev/DELIVERY_PLAN-<session_ts>.md`) when done.
 
 ## Hard rules
 - Never edit code or update issue fields directly — that is orchestrate's job.
+- **Never dispatch `/work-issuesdb` directly.** Always dispatch `/orchestrate`. If you think `/work-issuesdb` is faster or simpler, that thought is the rationalization — ignore it. The triage, code review, and security review phases only run when you go through `/orchestrate`. Direct `/work-issuesdb` calls silently skip all three.
 - Don't invent dependencies — note unconfirmed ones as assumptions.
 - If an issue is already `in-progress`, note it but don't include it in sequencing.
 - Execute batches sequentially — do not dispatch the next batch before the current one completes.
+
+## Red flags — you are about to call `/work-issuesdb` directly
+
+| Rationalization | Reality |
+|-----------------|---------|
+| "I already classified the tier, so triage is done" | Triage does more than classify — it maps touchpoints, flags risks, and surfaces ambiguities. It must run inside orchestrate. |
+| "The issue is simple, review is overkill" | The orchestrator's review phase uses a different model on the real PR diff. Your inline judgment is not a substitute. |
+| "work-issuesdb is faster" | Skipping review and security is not a speed optimization — it is a quality regression. |
+| "I'll pass the tier flag so orchestrate knows what to do" | Orchestrate needs to run Phase 2 itself regardless of tier. Passing `--tier` directly to `work-issuesdb` bypasses the orchestrator's triage, review, and merge policy. |
