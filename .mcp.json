@@ -1,14 +1,7 @@
 {
   "mcpServers": {
     "issuesdb": {
-      "command": "/Users/jared/dev/.venv-issuesdb/bin/python",
-      "args": [
-        "-m",
-        "issuesdb.mcp_server"
-      ],
-      "env": {
-        "ISSUESDB_DATABASE_URL": "${ISSUESDB_DATABASE_URL}"
-      }
+      "url": "https://issuesdb-mcp.onrender.com/mcp"
     }
   }
 }
