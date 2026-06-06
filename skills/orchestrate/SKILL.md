@@ -10,9 +10,14 @@ Run one full pipeline cycle: pick the next actionable item in each phase and pro
 
 ## Scoping
 
-Capture `$ARGUMENTS` and split by whitespace to get `scoped_ids` list.
+Parse `$ARGUMENTS` as follows:
+1. If `--project <name>` is present, extract it → set `project_filter = <name>`. Remove `--project` and its value from the token list.
+2. Remaining tokens are `scoped_ids` (issue IDs).
 
-**If `scoped_ids` is non-empty, operate in scoped mode:**
+This gives three modes:
+
+**Scoped mode** — `scoped_ids` is non-empty (with or without `--project`):
+- If `--project` is also set, fetch each ID and verify its `project` field matches `project_filter`. Any mismatch → comment "Orchestrator: issue #<id> does not belong to project <project_filter> — aborting." and exit.
 - If `scoped_ids` contains a single ID: set `bundle_ids = [scoped_ids[0]]`.
 - If `scoped_ids` contains multiple IDs: fetch each via `get_issue(id)` to confirm they exist and share the same `project` field. If projects differ, comment on the primary ID ("Orchestrator: bundling requires all IDs to share the same project — aborting.") and exit. Set `bundle_ids = scoped_ids`.
 - Phase 1 grooms each issue in `bundle_ids` (skipping any already at Ready or In-Progress).
@@ -21,7 +26,11 @@ Capture `$ARGUMENTS` and split by whitespace to get `scoped_ids` list.
 - If any issue is groomed to `status=needs-input` or `status=closed`, it is dropped from `bundle_ids`; if `bundle_ids` becomes empty, Phases 2-5 are skipped.
 - Phases 4-6 remain global (review, merge, and cleanup follow existing per-phase logic).
 
-**If `$ARGUMENTS` is empty (cron mode):** behavior is unchanged — global `list_issues` for each phase.
+**Project-scoped mode** — `--project <name>` is set, `scoped_ids` is empty:
+- Set `project_filter` and operate exactly like global/cron mode, but pass `project=project_filter` to **every** `list_issues` call in every phase. This confines all groom, triage, develop, and cleanup work to that single project.
+- Use this when the user says something like `/orchestrate --project take-flight` or "run all take-flight issues."
+
+**Global/cron mode** — `$ARGUMENTS` is empty: behavior is unchanged — `list_issues` with no project filter for each phase.
 
 ## Phase loop
 
@@ -54,9 +63,9 @@ After processing all issues:
 - If `len(bundle_ids) > 1`: `mcp__issuesdb__add_comment(issue_id=bundle_ids[0], body="Orchestrator: bundling <N> issues into single PR: #id1, #id2, ...")`
 - Continue to Phase 2.
 
-**Otherwise (global / cron mode):**
+**Otherwise (global / cron mode or project-scoped mode):**
 
-1. `mcp__issuesdb__list_issues(status="open", limit=4)`
+1. `mcp__issuesdb__list_issues(status="open", limit=4)` — if `project_filter` is set, add `project=project_filter`
 2. If no results: skip to Phase 2.
 3. If found: dispatch a single **general subagent** via the Task tool:
    ```
@@ -78,7 +87,7 @@ After processing all issues:
 **Find the issue to triage:**
 
 - **Scoped mode:** `Y = bundle_ids[0]` (primary issue, confirmed ready from Phase 1). If `bundle_ids` is empty after Phase 1, skip Phases 2-5 and go to Phase 6.
-- **Global/cron mode:** `mcp__issuesdb__list_issues(status="ready", limit=5)`. If no results, skip to Phase 3.
+- **Global/cron mode:** `mcp__issuesdb__list_issues(status="ready", limit=5)` — if `project_filter` is set, add `project=project_filter`. If no results, skip to Phase 3.
 
 **Classify impact tier** from the issue title and description:
 
