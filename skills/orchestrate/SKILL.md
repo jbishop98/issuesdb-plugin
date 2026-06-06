@@ -192,11 +192,14 @@ Review is only applicable if the development phase produced a PR and the tier is
    - Skip to Phase 5 (merge will be blocked).
 
 3. **If tier == 2 or tier == 3 and tests_pass is true:**
-   - Run the review via bash, using a **different LLM model** for independent signal (opencode uses `gh` CLI to fetch the PR):
+   - Run the review via bash, using a **different LLM model** for independent signal (opencode uses `gh` CLI to fetch the PR). Try `deepseek-v4-pro` first; if it reports insufficient balance, fall back to `big-pickle`:
      ```bash
-     opencode run --agent plan -m opencode-go/deepseek-v4-pro "/review <pr_url>" 2>&1
+     review_output=$(opencode run --agent plan -m opencode-go/deepseek-v4-pro "/review <pr_url>" 2>&1)
+     if echo "$review_output" | grep -qi "insufficient balance"; then
+       review_output=$(opencode run --agent plan -m opencode/big-pickle "/review <pr_url>" 2>&1)
+     fi
      ```
-   - **If `opencode` is not available** (command not found): skip review and comment "Orchestrator: review skipped — opencode CLI not available."
+   - **If `opencode` is not available** (command not found) **or both models report insufficient balance**: skip review and comment "Orchestrator: review skipped — opencode unavailable or no balance on either model."
    - Parse the review output for findings:
      - **Critical** (blockers — must fix before merge): security vulnerabilities, data loss, auth bypass
      - **Non-critical** (advisory): style issues, minor improvements, suggestions
