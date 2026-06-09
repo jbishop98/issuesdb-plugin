@@ -18,7 +18,7 @@ PLUGIN_DIR = Path(__file__).parent.parent
 COMMANDS_DIR = PLUGIN_DIR / "commands"
 PLUGIN_SKILLS_DIR = PLUGIN_DIR / "skills"
 DEFAULT_SKILLS_DIR = Path.home() / ".claude" / "skills"
-ANTIGRAVITY_SKILLS_DIR = Path.home() / ".gemini" / "antigravity" / "skills"
+ANTIGRAVITY_SKILLS_DIR = Path.home() / ".gemini" / "config" / "skills"
 OPENCODE_SKILLS_DIR = Path.home() / ".config" / "opencode" / "skills"
 
 # Agents are authored once in agents/ (Claude Code format) and fan out to each
