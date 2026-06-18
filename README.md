@@ -12,6 +12,20 @@ Takes a raw `status=open` issue and turns it into something an implementer can a
 ### `/work-issuesdb [issue-id]`
 Picks up a `status=ready` issue and drives it to a reviewable PR: triage → plan → worktree → TDD implementation → security review → PR.
 
+## Pilot (Python CLI)
+
+`pilot/` is a standalone Python port of the `pilot` agent — a delivery planner
+and executor that loads issues, classifies tiers, maps dependencies, sequences
+them into batches, and dispatches each batch to `/orchestrate`. Deterministic
+plumbing runs in Python; only tier/readiness/dependency judgment calls use an
+LLM. It runs headless from cron/CI. See [`pilot/README.md`](pilot/README.md).
+
+```bash
+pip install -e .          # provides the `pilot` command
+pilot --help              # input modes, flags, and required env vars
+pilot rentaway --dry-run  # plan a project without executing
+```
+
 ## Directory Structure
 
 - `plugin.json` — Manifest file for Google Antigravity.

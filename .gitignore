@@ -1,2 +1,6 @@
 .DS_Store
 .obsidian/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
