@@ -44,21 +44,23 @@ Issue details (already fetched — no need to re-fetch):
 ...
 ```
 
-treat those entries as the **authoritative snapshot** for the listed IDs and do
-**not** call `mcp__issuesdb__get_issue` again just to read an issue's title or
-body. This avoids redundant fetches across the groom and triage steps — the
-re-fetch is the cost the pilot already paid.
+treat those entries as the issue snapshot for **Phase 1 grooming only** and skip
+the redundant `mcp__issuesdb__get_issue` read there — the re-fetch is the cost
+the pilot already paid.
 
 Rules:
-- Use forwarded title/body wherever a phase below says to read the issue body
-  (tier classification, the triage dispatch).
-- When you dispatch `/groom-issue` or the `issue-triage` agent for a forwarded
-  ID, append that ID's forwarded `### #<id>` block to the dispatch so the
-  subagent uses it instead of fetching the issue itself.
+- When you dispatch `/groom-issue` for a forwarded ID, append that ID's
+  forwarded `### #<id>` block to the dispatch so the subagent uses it instead of
+  fetching the issue itself.
+- **Do not use the forwarded block in Phase 2 (triage).** Grooming rewrites the
+  issue body (Problem, Acceptance criteria, `## Touchpoints`, …), so by the time
+  triage runs the forwarded snapshot is stale. Triage must read the current,
+  post-groom body — that is the `## Touchpoints` section it is told to validate
+  and extend.
 - Still call `mcp__issuesdb__get_issue` when you need a field the block does not
   carry (e.g. `status` or `project` for an ID), and always use
   `mcp__issuesdb__update_issue` / `add_comment` for writes — forwarding only
-  replaces **reads**.
+  replaces the **Phase 1 read**.
 - If no forwarded block is present (e.g. cron mode), behavior is unchanged.
 
 ## Phase loop
@@ -118,7 +120,7 @@ After processing all issues:
 - **Scoped mode:** `Y = bundle_ids[0]` (primary issue, confirmed ready from Phase 1). If `bundle_ids` is empty after Phase 1, skip Phases 2-5 and go to Phase 6.
 - **Global/cron mode:** `mcp__issuesdb__list_issues(status="ready", limit=5)` — if `project_filter` is set, add `project=project_filter`. If no results, skip to Phase 3.
 
-**Classify impact tier** from the issue title and description (use the forwarded `### #<id>` block if one was provided, otherwise read the issue):
+**Classify impact tier** from the issue title and description:
 
 | Signal   | Tier 1 — Low                              | Tier 2 — Medium                               | Tier 3 — High                                                                      |
 | -------- | ----------------------------------------- | --------------------------------------------- | ---------------------------------------------------------------------------------- |
@@ -148,7 +150,7 @@ Continue to Phase 3.
 
 > The orchestrator invokes the `issue-triage` **agent** directly (not the `/triage-issue` skill) because it needs the full structured report — touchpoints and risk_flags — to forward into development, not just a tier verdict. `/triage-issue` is for standalone human-driven routing.
 
-Dispatch with the issue body and the repo cwd — pass the forwarded `### #<id>` block as the issue body if one was provided, so the agent does not re-fetch. Tell the agent to **validate and extend** the `## Touchpoints` section grooming already wrote into the issue body, rather than rebuilding it from scratch. Parse the structured report for:
+Dispatch with the issue body and the repo cwd. Tell the agent to **validate and extend** the `## Touchpoints` section grooming already wrote into the issue body, rather than rebuilding it from scratch. Parse the structured report for:
 - `ambiguities` — blocking questions that must be answered before code can be written
 - `touchpoints` — files/modules most likely to change
 - `risk_flags` — data migrations, auth surface, breaking changes, shared infra
