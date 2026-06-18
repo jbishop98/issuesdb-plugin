@@ -31,6 +31,35 @@ This gives three modes:
 
 **Global/cron mode** — `$ARGUMENTS` is empty: behavior is unchanged — `list_issues` with no project filter for each phase.
 
+## Forwarded context (from the pilot)
+
+The pilot loads issues during delivery planning and may forward what it already
+fetched into this invocation's prompt. If the prompt contains a block like:
+
+```
+Issue details (already fetched — no need to re-fetch):
+### #<id> <title>
+<body>
+...
+```
+
+treat those entries as the **authoritative snapshot** for the listed IDs and do
+**not** call `mcp__issuesdb__get_issue` again just to read an issue's title or
+body. This avoids redundant fetches across the groom and triage steps — the
+re-fetch is the cost the pilot already paid.
+
+Rules:
+- Use forwarded title/body wherever a phase below says to read the issue body
+  (tier classification, the triage dispatch).
+- When you dispatch `/groom-issue` or the `issue-triage` agent for a forwarded
+  ID, append that ID's forwarded `### #<id>` block to the dispatch so the
+  subagent uses it instead of fetching the issue itself.
+- Still call `mcp__issuesdb__get_issue` when you need a field the block does not
+  carry (e.g. `status` or `project` for an ID), and always use
+  `mcp__issuesdb__update_issue` / `add_comment` for writes — forwarding only
+  replaces **reads**.
+- If no forwarded block is present (e.g. cron mode), behavior is unchanged.
+
 ## Phase loop
 
 Execute each phase in order. If a phase has no work, skip to the next. If any phase completes successfully, continue to the next phase (don't exit early). Exit when all phases are exhausted or a hard stop is hit.
@@ -50,7 +79,7 @@ Comment-trail the **decisions** that matter for unattended visibility — tier c
    ```
    /groom-issue <id1> <id2> ...
    ```
-   (space-separated IDs of all issues needing grooming — `groom-issue` processes them in parallel)
+   (space-separated IDs of all issues needing grooming — `groom-issue` processes them in parallel). If forwarded `### #<id>` blocks exist for any of these IDs, append them to the dispatch so the subagent skips re-fetching.
 3. Parse all `## RESULT` blocks from the subagent's output (one per issue):
    - `status=ready` → keep in `bundle_ids`
    - `status=needs-input` → `mcp__issuesdb__add_comment(issue_id=<id>, body="Orchestrator: grooming paused — N questions need human input.")`, remove from `bundle_ids`
@@ -88,7 +117,7 @@ After processing all issues:
 - **Scoped mode:** `Y = bundle_ids[0]` (primary issue, confirmed ready from Phase 1). If `bundle_ids` is empty after Phase 1, skip Phases 2-5 and go to Phase 6.
 - **Global/cron mode:** `mcp__issuesdb__list_issues(status="ready", limit=5)` — if `project_filter` is set, add `project=project_filter`. If no results, skip to Phase 3.
 
-**Classify impact tier** from the issue title and description:
+**Classify impact tier** from the issue title and description (use the forwarded `### #<id>` block if one was provided, otherwise read the issue):
 
 | Signal   | Tier 1 — Low                              | Tier 2 — Medium                               | Tier 3 — High                                                                      |
 | -------- | ----------------------------------------- | --------------------------------------------- | ---------------------------------------------------------------------------------- |
@@ -118,7 +147,7 @@ Continue to Phase 3.
 
 > The orchestrator invokes the `issue-triage` **agent** directly (not the `/triage-issue` skill) because it needs the full structured report — touchpoints and risk_flags — to forward into development, not just a tier verdict. `/triage-issue` is for standalone human-driven routing.
 
-Dispatch with the issue body and the repo cwd. Tell the agent to **validate and extend** the `## Touchpoints` section grooming already wrote into the issue body, rather than rebuilding it from scratch. Parse the structured report for:
+Dispatch with the issue body and the repo cwd — pass the forwarded `### #<id>` block as the issue body if one was provided, so the agent does not re-fetch. Tell the agent to **validate and extend** the `## Touchpoints` section grooming already wrote into the issue body, rather than rebuilding it from scratch. Parse the structured report for:
 - `ambiguities` — blocking questions that must be answered before code can be written
 - `touchpoints` — files/modules most likely to change
 - `risk_flags` — data migrations, auth surface, breaking changes, shared infra
