@@ -77,16 +77,48 @@ class Tracker:
 
 
 def _extract_payload(result: Any) -> Any:
-    """Pull JSON out of an MCP CallToolResult's content blocks."""
+    """Pull JSON out of an MCP CallToolResult.
+
+    Tolerates the several wire shapes different mcp-server versions emit for a
+    tool annotated ``-> str``:
+
+    * plain text block holding a JSON array/object (older servers);
+    * ``structuredContent`` set, with the real value wrapped as ``{"result": …}``
+      because primitive returns get wrapped (mcp >= ~1.10);
+    * a text block whose JSON is *double-encoded* (a JSON string that itself
+      decodes to more JSON), which otherwise yields a bare ``str`` and trips up
+      callers expecting a dict/list.
+    """
+    # Prefer structuredContent — it's the typed payload when the server sets it.
+    structured = getattr(result, "structuredContent", None)
+    if isinstance(structured, dict):
+        # Primitive returns are wrapped as {"result": <value>}.
+        value = structured["result"] if set(structured) == {"result"} else structured
+        return _maybe_reparse(value)
+
     content = getattr(result, "content", None) or []
     for block in content:
         text = getattr(block, "text", None)
         if text:
             try:
-                return json.loads(text)
+                return _maybe_reparse(json.loads(text))
             except json.JSONDecodeError:
                 return text
     return None
+
+
+def _maybe_reparse(value: Any) -> Any:
+    """Decode one extra JSON layer if the value is itself a JSON string.
+
+    Some server versions double-encode the payload, so ``json.loads`` returns a
+    ``str`` that still needs parsing into the real list/dict.
+    """
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return value
+    return value
 
 
 def _as_list(data: Any) -> list:
