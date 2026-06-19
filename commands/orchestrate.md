@@ -246,15 +246,29 @@ Review is only applicable if the development phase produced a PR and the tier is
 
 Apply auto-merge policy based on tier and the outcome of prior phases.
 
+**Auto-merge is asynchronous.** `gh pr merge --auto` only *queues* the merge — it fires later, when CI passes. So whenever you issue an auto-merge below you MUST run **WAIT-FOR-MERGE** before continuing to Phase 6. If you skip the wait and proceed straight to cleanup, the branch is still unmerged, Phase 6 finds nothing to clean, and the worktree + branch + issue-status are left dangling until some unrelated future invocation happens to sweep them. **Do not skip the wait to "save a few minutes" — that shortcut is exactly what leaves the mess this phase exists to prevent.**
+
+> **WAIT-FOR-MERGE(pr_url):** after issuing the auto-merge, poll until the PR actually merges or CI settles:
+> ```bash
+> for i in $(seq 1 30); do
+>   state=$(gh pr view <pr_url> --json state -q .state)
+>   [ "$state" = "MERGED" ] && break
+>   sleep 30   # ~15-min window; adapt the cadence to your runtime
+> done
+> ```
+> - **state == `MERGED`** → continue to Phase 6 (the branch is now genuinely cleanable, and you still hold `bundle_ids` + `pr_url` in context).
+> - **still `OPEN` after the window** (CI slow/lagging — GitHub Actions can lag well over an hour): leave the queued `--auto` in place (it will still merge later), `mcp__issuesdb__add_comment(issue_id=Y, body="Orchestrator: auto-merge queued; CI still pending after the wait window. A later cycle's cleanup will reap the branch once it lands.")`, and **exit WITHOUT running Phase 6** (never clean an unmerged branch). The next invocation's cross-invocation cleanup catches it.
+> - **state == `CLOSED`** (merged=false) → the merge was rejected or the PR closed; `mcp__issuesdb__add_comment(issue_id=Y, body="Orchestrator: PR closed without merging — no cleanup.")` and exit without Phase 6.
+
 1. **Tier 1 + tests_pass == true:**
    - `gh pr merge <pr_url> --squash --auto`
    - For each id in `bundle_ids`: `mcp__issuesdb__add_comment(issue_id=<id>, body="Orchestrator: auto-merged (Tier 1, tests passed).")`
-   - Continue to Phase 6.
+   - **WAIT-FOR-MERGE(pr_url)**, then continue to Phase 6.
 
 2. **Tier 2 + tests_pass == true + no critical review findings:**
    - `gh pr merge <pr_url> --squash --auto`
    - `mcp__issuesdb__add_comment(issue_id=Y, body="Orchestrator: auto-merged (Tier 2, review passed).")`
-   - Continue to Phase 6.
+   - **WAIT-FOR-MERGE(pr_url)**, then continue to Phase 6.
 
 3. **Tier 2 + (tests_pass == false OR critical review findings):**
    - `mcp__issuesdb__add_comment(issue_id=Y, body="Orchestrator: merge blocked — tests failed or review flagged critical issues. PR: <pr_url>")`
@@ -273,24 +287,39 @@ Apply auto-merge policy based on tier and the outcome of prior phases.
 
 ### Phase 6 — CLEANUP
 
-Detect and clean up one merged branch per invocation.
+Clean up one merged branch per invocation. There are two paths — prefer the in-invocation one, since WAIT-FOR-MERGE has just confirmed the merge and you still hold the exact branch in hand.
 
-1. Find merged branches: `git branch --merged origin/main | grep -E 'issue-\d+' | head -1`
-2. If no merged branches: exit.
-3. Extract the branch name. Parse the issue id from the name pattern `issue-<id>-*`.
-4. Remove the worktree (if it exists):
+**Path A — in-invocation (you just merged in Phase 5):**
+
+1. Get the exact branch name from the merged PR (base-branch-independent — works whether the project merges to `main` or `staging`):
+   ```bash
+   branch=$(gh pr view <pr_url> --json headRefName -q .headRefName)
+   ```
+2. Remove its worktree if one exists, then delete the branch:
+   ```bash
+   path=$(git worktree list --porcelain | grep -B2 "branch refs/heads/$branch" | grep '^worktree ' | awk '{print $2}')
+   [ -n "$path" ] && git worktree remove "$path" --force 2>/dev/null || true
+   git branch -D "$branch" 2>/dev/null || true
+   ```
+3. Close each id in `bundle_ids`: `mcp__issuesdb__update_issue(<id>, status="closed")`. (No separate "cleanup complete" comment — the status change is the trail.)
+4. Exit.
+
+**Path B — cross-invocation sweep (no merge happened this invocation; reaping a leftover from an earlier cycle whose CI landed after that cycle exited):**
+
+1. Determine the base branch this project merges into — **most issuesdb projects target `main`, but issuesdb and rentaway target `staging`** (check the project's CLAUDE.md). Find a merged issue branch against the correct base — never assume `main`:
+   ```bash
+   git branch --merged origin/<base> | grep -E 'issue-[0-9]+' | head -1
+   ```
+   If unsure of the base, check both: `for b in main staging; do git branch --merged origin/$b 2>/dev/null | grep -E 'issue-[0-9]+'; done | sort -u | head -1`.
+2. If no merged branch found: exit.
+3. Parse the issue id from the branch name pattern `issue-<id>-*`.
+4. Remove the worktree (if it exists) and delete the branch:
    ```bash
    git worktree remove <path> --force 2>/dev/null || true
-   ```
-5. Delete the branch:
-   ```bash
    git branch -D <branch_name>
    ```
-6. Close issues:
-   - If `bundle_ids` is available from this invocation's Phase 3 RESULT: close each id in `bundle_ids`.
-   - Otherwise (cross-invocation cleanup): close only the primary `<id>` parsed from the branch name.
-   - For each id being closed: `mcp__issuesdb__update_issue(<id>, status="closed")`. (No separate "cleanup complete" comment — the status change is the trail.)
-7. Exit.
+5. Close only the primary `<id>` parsed from the branch name: `mcp__issuesdb__update_issue(<id>, status="closed")`.
+6. Exit.
 
 ## Guardrails
 
@@ -302,5 +331,7 @@ Detect and clean up one merged branch per invocation.
 - **The review phase uses `opencode run` via bash**, NOT the Task tool. This ensures a different model and independent process for review.
 - If any subagent or shell command fails or times out, log the error as a comment and exit. The next orchestrator invocation will retry.
 - If Phase 6 finds multiple merged branches, clean up only one per invocation (keeps the run bounded).
+- **Never proceed to Phase 6 on a queued-but-unmerged PR.** Auto-merge is async; WAIT-FOR-MERGE must confirm `MERGED` first, or cleanup runs against a branch that doesn't exist yet and leaves the worktree/branch/issue-status dangling.
+- **Phase 6 discovery must use the project's real base branch** (issuesdb + rentaway → `staging`, not `main`). A branch merged to `staging` never shows as merged to `origin/main`, so a `main`-only grep silently reaps nothing and the worktree lingers forever.
 - The orchestrator itself is **read-only** — it never edits code, only dispatches subagents, runs bash commands, and updates issuesdb.
 - One invocation, one cycle. Do not loop internally — cron handles repetition.
