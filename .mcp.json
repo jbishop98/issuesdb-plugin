@@ -2,7 +2,7 @@
   "mcpServers": {
     "issuesdb": {
       "type": "http",
-      "url": "https://issuesdb-mcp.onrender.com/mcp",
+      "url": "https://issuesdb-mcp.redbishop.nz/mcp",
       "headers": {
         "Authorization": "Bearer ${ISSUESDB_MCP_SECRET}"
       }
