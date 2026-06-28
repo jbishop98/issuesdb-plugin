@@ -17,6 +17,7 @@ class Config:
     mcp_secret: str = ""
     anthropic_api_key: str = ""
     model: str = DEFAULT_MODEL
+    planner: str = "auto"  # "auto" | "api" | "claude"
     dispatch: str = "opencode"  # "opencode" | "claude"
     plan_dir: Path = Path("~/dev").expanduser()
     dry_run: bool = False
@@ -30,6 +31,7 @@ class Config:
             mcp_secret=os.environ.get("ISSUESDB_MCP_SECRET", ""),
             anthropic_api_key=os.environ.get("ANTHROPIC_API_KEY", ""),
             model=os.environ.get("PILOT_MODEL", DEFAULT_MODEL),
+            planner=os.environ.get("PILOT_PLANNER", "auto"),
         )
 
     def plan_path(self) -> Path:
