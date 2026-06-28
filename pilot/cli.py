@@ -40,10 +40,10 @@ examples:
 
 environment:
   ISSUESDB_MCP_SECRET   Bearer token for the issuesdb MCP server (required)
-  ANTHROPIC_API_KEY     key for the tier/readiness/dependency LLM calls (required
-                        unless --no-llm)
+  ANTHROPIC_API_KEY     key for API-based planning (only needed with --planner api)
   ISSUESDB_MCP_URL      override the MCP endpoint (optional)
   PILOT_MODEL           override the classifier model (optional)
+  PILOT_PLANNER         default planner backend: auto | api | claude (default: auto)
 
 The pilot never edits code or merges. Each batch is dispatched to /orchestrate,
 which owns the groom -> triage -> develop -> review -> merge pipeline.
@@ -98,6 +98,17 @@ def build_parser() -> argparse.ArgumentParser:
         default=3600,
         metavar="SECONDS",
         help="per-batch dispatch timeout in seconds (default: 3600)",
+    )
+    parser.add_argument(
+        "--planner",
+        choices=("auto", "api", "claude"),
+        default=None,
+        help=(
+            "how to run the planning LLM calls. 'api' uses the Anthropic API "
+            "(needs ANTHROPIC_API_KEY), 'claude' shells out to claude -p (uses "
+            "your subscription, no key needed). 'auto' (default) picks 'api' if "
+            "ANTHROPIC_API_KEY is set, otherwise 'claude'."
+        ),
     )
     parser.add_argument(
         "--no-llm",
@@ -161,6 +172,8 @@ def run(argv: list[str] | None = None) -> int:
     config.dry_run = args.dry_run
     config.dispatch = args.dispatch
     config.timeout = args.timeout
+    if args.planner:
+        config.planner = args.planner
     if args.plan_dir:
         config.plan_dir = args.plan_dir.expanduser()
     if args.model:
@@ -186,19 +199,15 @@ def run(argv: list[str] | None = None) -> int:
             i.include = True
     else:
         classifier = _make_classifier(config)
-        open_issues = [i for i in issues if i.status == "open"]
-        readiness = classifier.assess_readiness(open_issues)
-        for i in open_issues:
-            include, needs, reason = readiness.get(i.id, (True, False, ""))
+        result = classifier.plan_all(issues)
+        for i in issues:
+            include, needs, reason = result.readiness.get(i.id, (True, False, ""))
             i.include, i.needs_grooming = include, needs
             if not include:
                 i.exclude_reason = reason
-        included = [i for i in issues if i.include]
-        tiers = classifier.classify_tiers(included)
-        for i in included:
-            tier, _reason = tiers.get(i.id, (2, ""))
+            tier, _reason = result.tiers.get(i.id, (2, ""))
             i.tier = tier
-        inferred = classifier.infer_dependencies(included)
+        inferred = result.deps
 
     included = [i for i in issues if i.include]
     edges = merge_edges(explicit_edges(included), inferred)
@@ -230,9 +239,15 @@ def run_console() -> None:
 
 
 def _make_classifier(config: Config):
-    from .classify import Classifier
+    from .classify import ApiBackend, ClaudeCliBackend, Classifier
 
-    return Classifier(config.anthropic_api_key, config.model)
+    planner = config.planner
+    if planner == "auto":
+        planner = "api" if config.anthropic_api_key else "claude"
+    if planner == "claude":
+        backend = ClaudeCliBackend(model=config.model, timeout=config.timeout)
+        return Classifier(backend)
+    return Classifier(ApiBackend(config.anthropic_api_key, config.model))
 
 
 def _execute(plan, edges, config, tracker, issue_map, titles, plan_path) -> None:
